@@ -10,8 +10,8 @@
  * - Shows recently archived assets
  */
 
-import { iconikRequest, initializeProfile, getCurrentProfileInfo } from "../src/client.js";
-import { getProfileFromArgs } from "../src/config.js";
+import { iconikRequest, initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
+import { getProfileFromArgs } from "../src/config.ts";
 
 // Initialize with profile from args
 const profileName = getProfileFromArgs();
