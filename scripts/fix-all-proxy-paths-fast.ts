@@ -3,7 +3,11 @@
 /**
  * FIX ALL PROXY PATHS (FAST) - Parallel processing version
  *
- * This script fixes proxy files that were moved by a server-side script:
+ * This script fixes proxy files that were moved by a server-side script.
+ * It scans an entire storage for MISSING files matching a pattern and
+ * updates their paths.
+ *
+ * Default pattern (can be customized via --old-pattern and --new-pattern):
  * - Original: {project}/{path}/filename_editproxy.ext
  * - New:      {project}/_Proxies/{path}/filename_Proxy.ext
  *
@@ -18,6 +22,32 @@ initializeProfile(profileName);
 
 const isLive = process.argv.includes('--live');
 const CONCURRENCY = 10; // Process 10 files at a time
+
+// Parse optional flags
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const oldPatternArg = process.argv.find(a => a.startsWith('--old-pattern='));
+const newPatternArg = process.argv.find(a => a.startsWith('--new-pattern='));
+const newDirArg = process.argv.find(a => a.startsWith('--new-dir='));
+
+const storageName = storageArg?.split('=')[1];
+const oldPattern = oldPatternArg?.split('=')[1] || '_editproxy';
+const newPattern = newPatternArg?.split('=')[1] || '_Proxy';
+const newProxyDir = newDirArg?.split('=')[1] || '_Proxies';
+
+if (!storageName) {
+  console.error('Usage: npx tsx scripts/fix-all-proxy-paths-fast.ts --storage=StorageName --profile=name [options]');
+  console.error('');
+  console.error('Options:');
+  console.error('  --storage=NAME      Storage to scan for missing files (REQUIRED)');
+  console.error('  --live              Actually update files (default is dry run)');
+  console.error('  --old-pattern=STR   Pattern to match in filenames (default: _editproxy)');
+  console.error('  --new-pattern=STR   Replacement pattern for filenames (default: _Proxy)');
+  console.error('  --new-dir=NAME      New subdirectory for proxies (default: _Proxies)');
+  console.error('');
+  console.error('Example:');
+  console.error('  npx tsx scripts/fix-all-proxy-paths-fast.ts --storage=MyStorage --profile=myprofile --live');
+  process.exit(1);
+}
 
 interface Asset {
   id: string;
@@ -54,11 +84,11 @@ interface PaginatedResponse<T> {
 }
 
 function transformPath(oldPath: string, oldName: string): { newPath: string; newName: string } | null {
-  if (!oldName.toLowerCase().includes('_editproxy')) {
+  if (!oldName.toLowerCase().includes(oldPattern.toLowerCase())) {
     return null;
   }
 
-  const newName = oldName.replace(/_editproxy/gi, '_Proxy');
+  const newName = oldName.replace(new RegExp(oldPattern, 'gi'), newPattern);
   const pathParts = oldPath.split('/');
   if (pathParts.length < 1) {
     return null;
@@ -66,12 +96,12 @@ function transformPath(oldPath: string, oldName: string): { newPath: string; new
 
   const project = pathParts[0];
   const rest = pathParts.slice(1).join('/');
-  const newPath = rest ? `${project}/_Proxies/${rest}` : `${project}/_Proxies`;
+  const newPath = rest ? `${project}/${newProxyDir}/${rest}` : `${project}/${newProxyDir}`;
 
   return { newPath, newName };
 }
 
-async function processFile(file: File, trickStorageId: string): Promise<{ success: boolean; error?: string }> {
+async function processFile(file: File, targetStorageId: string): Promise<{ success: boolean; error?: string }> {
   const fileName = file.original_name || file.name;
   const transform = transformPath(file.directory_path, fileName);
 
@@ -80,13 +110,13 @@ async function processFile(file: File, trickStorageId: string): Promise<{ succes
   }
 
   try {
-    // Find the file set with _editproxy in the name
+    // Find the file set matching the old pattern
     const fileSets = await iconikRequest<PaginatedResponse<FileSet>>(
-      `files/v1/assets/${file.asset_id}/file_sets/?storage_id=${trickStorageId}`
+      `files/v1/assets/${file.asset_id}/file_sets/?storage_id=${targetStorageId}`
     );
 
-    const editProxyFileSet = fileSets.objects?.find(fs =>
-      fs.name?.toLowerCase().includes('_editproxy')
+    const matchingFileSet = fileSets.objects?.find(fs =>
+      fs.name?.toLowerCase().includes(oldPattern.toLowerCase())
     );
 
     // Update the file
@@ -101,8 +131,8 @@ async function processFile(file: File, trickStorageId: string): Promise<{ succes
     });
 
     // Update the file set if found
-    if (editProxyFileSet) {
-      await iconikRequest(`files/v1/assets/${file.asset_id}/file_sets/${editProxyFileSet.id}/`, {
+    if (matchingFileSet) {
+      await iconikRequest(`files/v1/assets/${file.asset_id}/file_sets/${matchingFileSet.id}/`, {
         method: 'PATCH',
         body: JSON.stringify({
           name: transform.newName,
@@ -117,13 +147,13 @@ async function processFile(file: File, trickStorageId: string): Promise<{ succes
   }
 }
 
-async function processBatch(files: File[], trickStorageId: string, isLive: boolean): Promise<{ fixed: number; errors: number }> {
+async function processBatch(files: File[], targetStorageId: string, isLive: boolean): Promise<{ fixed: number; errors: number }> {
   if (!isLive) {
     return { fixed: files.length, errors: 0 };
   }
 
   const results = await Promise.all(
-    files.map(file => processFile(file, trickStorageId))
+    files.map(file => processFile(file, targetStorageId))
   );
 
   const fixed = results.filter(r => r.success).length;
@@ -143,36 +173,42 @@ async function main() {
   console.log(`Started: ${startTime.toISOString()}`);
   console.log(`Mode: ${isLive ? '🔴 LIVE - WILL UPDATE FILES' : '🟡 DRY RUN - No files will be updated'}`);
   console.log(`Concurrency: ${CONCURRENCY} parallel requests`);
+  console.log(`Storage: ${storageName}`);
+  console.log(`Pattern: ${oldPattern} → ${newPattern}`);
+  console.log(`New directory: ${newProxyDir}`);
   console.log(`${"═".repeat(70)}\n`);
 
   // Get storages
   const storages = await iconikRequest<PaginatedResponse<Storage>>('files/v1/storages/');
-  const trickStorage = storages.objects.find(s => s.name === 'Trick');
+  const targetStorage = storages.objects.find(s => s.name === storageName);
 
-  if (!trickStorage) {
-    console.error('Could not find Trick storage');
+  if (!targetStorage) {
+    console.error(`Storage '${storageName}' not found. Available storages:`);
+    for (const s of storages.objects) {
+      console.error(`  - ${s.name}`);
+    }
     process.exit(1);
   }
 
-  console.log(`Trick storage ID: ${trickStorage.id}\n`);
+  console.log(`Target storage ID: ${targetStorage.id}\n`);
 
   let totalScanned = 0;
   let totalFound = 0;
   let totalFixed = 0;
   let totalErrors = 0;
-  let consecutiveNoEditProxy = 0;
+  let consecutiveNoMatch = 0;
   const processedAssets = new Set<string>();
   const processedFileIds = new Set<string>(); // Track file IDs we've seen to detect when we've looped
 
-  console.log('Scanning Trick storage for MISSING editproxy files...\n');
+  console.log(`Scanning ${storageName} storage for MISSING files matching '${oldPattern}'...\n`);
 
   // First, get total count
   const firstPage = await iconikRequest<PaginatedResponse<File>>(
-    `files/v1/storages/${trickStorage.id}/files/?per_page=100&page=1&status=MISSING`
+    `files/v1/storages/${targetStorage.id}/files/?per_page=100&page=1&status=MISSING`
   );
 
   const initialTotal = firstPage.total || 0;
-  console.log(`Total MISSING files on Trick storage: ${initialTotal.toLocaleString()}\n`);
+  console.log(`Total MISSING files on ${storageName} storage: ${initialTotal.toLocaleString()}\n`);
 
   let page = 1;
   const maxPages = Math.ceil(initialTotal / 100) + 10;
@@ -180,7 +216,7 @@ async function main() {
   while (page <= maxPages) {
     try {
       const files = await iconikRequest<PaginatedResponse<File>>(
-        `files/v1/storages/${trickStorage.id}/files/?per_page=100&page=${page}&status=MISSING`
+        `files/v1/storages/${targetStorage.id}/files/?per_page=100&page=${page}&status=MISSING`
       );
 
       if (!files.objects || files.objects.length === 0) {
@@ -204,30 +240,30 @@ async function main() {
 
       totalScanned += files.objects.length;
 
-      // Filter to only editproxy files we haven't processed
-      const editProxyFiles = files.objects.filter(file => {
+      // Filter to only files matching the pattern that we haven't processed
+      const matchingFiles = files.objects.filter(file => {
         if (!file.asset_id || processedAssets.has(file.asset_id)) return false;
         const name = file.original_name || file.name || '';
-        if (!name.toLowerCase().includes('_editproxy')) return false;
+        if (!name.toLowerCase().includes(oldPattern.toLowerCase())) return false;
         processedAssets.add(file.asset_id);
         return true;
       });
 
-      if (editProxyFiles.length === 0) {
-        consecutiveNoEditProxy++;
-        // If we've gone through 50 pages (5000 files) without finding any editproxy files, we're probably done
-        if (consecutiveNoEditProxy >= 50) {
-          console.log('No editproxy files found in last 50 pages - assuming complete');
+      if (matchingFiles.length === 0) {
+        consecutiveNoMatch++;
+        // If we've gone through 50 pages (5000 files) without finding any matching files, we're probably done
+        if (consecutiveNoMatch >= 50) {
+          console.log(`No matching files found in last 50 pages - assuming complete`);
           break;
         }
       } else {
-        consecutiveNoEditProxy = 0;
-        totalFound += editProxyFiles.length;
+        consecutiveNoMatch = 0;
+        totalFound += matchingFiles.length;
 
         // Process in batches of CONCURRENCY
-        for (let i = 0; i < editProxyFiles.length; i += CONCURRENCY) {
-          const batch = editProxyFiles.slice(i, i + CONCURRENCY);
-          const result = await processBatch(batch, trickStorage.id, isLive);
+        for (let i = 0; i < matchingFiles.length; i += CONCURRENCY) {
+          const batch = matchingFiles.slice(i, i + CONCURRENCY);
+          const result = await processBatch(batch, targetStorage.id, isLive);
           totalFixed += result.fixed;
           totalErrors += result.errors;
         }
@@ -250,7 +286,7 @@ async function main() {
         console.log(`Page ${page} no longer exists - restarting from page 1`);
         page = 1;
         processedFileIds.clear();
-        consecutiveNoEditProxy = 0;
+        consecutiveNoMatch = 0;
       } else {
         console.log(`Error on page ${page}: ${errorMsg}`);
         page++;
@@ -270,7 +306,7 @@ async function main() {
   console.log(`Finished: ${endTime.toISOString()}`);
   console.log(`Duration: ${Math.floor(duration / 60)}m ${duration % 60}s`);
   console.log(`Files scanned: ${totalScanned.toLocaleString()}`);
-  console.log(`Editproxy files found: ${totalFound}`);
+  console.log(`Matching files found: ${totalFound}`);
 
   if (isLive) {
     console.log(`Files fixed: ${totalFixed}`);

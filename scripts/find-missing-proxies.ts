@@ -1,7 +1,10 @@
 #!/usr/bin/env npx tsx
 
 /**
- * FIND MISSING PROXIES - Find assets with missing PPRO_PROXY files
+ * FIND MISSING PROXIES - Find assets with missing proxy files on a storage
+ *
+ * Scans a collection for assets with a specified proxy format that have
+ * files with MISSING status on the specified storage.
  */
 
 import { iconikRequest, initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
@@ -10,11 +13,24 @@ import { getProfileFromArgs } from "../src/config.ts";
 const profileName = getProfileFromArgs();
 initializeProfile(profileName);
 
+// Parse arguments
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const collectionId = args[0];
 
+// Parse optional flags
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const formatArg = process.argv.find(a => a.startsWith('--format='));
+const storageName = storageArg?.split('=')[1];
+const formatName = formatArg?.split('=')[1] || 'PROXY'; // Default to common proxy format name
+
 if (!collectionId) {
-  console.error('Usage: npx tsx scripts/find-missing-proxies.ts <collection_id> --profile=name');
+  console.error('Usage: npx tsx scripts/find-missing-proxies.ts <collection_id> --profile=name [--storage=StorageName] [--format=FormatName]');
+  console.error('');
+  console.error('Options:');
+  console.error('  --storage=NAME   Storage to check for missing files (if not specified, checks all storages)');
+  console.error('  --format=NAME    Proxy format name to look for (default: PROXY)');
+  console.error('');
+  console.error('Example: npx tsx scripts/find-missing-proxies.ts abc123 --profile=myprofile --storage=MyStorage --format=PROXY');
   process.exit(1);
 }
 
@@ -67,14 +83,27 @@ async function main() {
   console.log(`FIND MISSING PROXIES`);
   console.log(`${"═".repeat(70)}`);
   console.log(`Profile: ${profile.name}`);
-  console.log(`Collection: ${collectionId}\n`);
+  console.log(`Collection: ${collectionId}`);
+  console.log(`Format: ${formatName}`);
+  console.log(`Storage filter: ${storageName || '(all storages)'}\n`);
 
   // Get storages
   const storages = await iconikRequest<PaginatedResponse<Storage>>('files/v1/storages/');
   const storageMap = new Map(storages.objects.map(s => [s.id, s.name]));
-  const trickStorageId = storages.objects.find(s => s.name === 'Trick')?.id;
 
-  console.log(`Trick storage ID: ${trickStorageId}\n`);
+  let targetStorageId: string | undefined;
+  if (storageName) {
+    const storage = storages.objects.find(s => s.name === storageName);
+    if (!storage) {
+      console.error(`Storage '${storageName}' not found. Available storages:`);
+      for (const s of storages.objects) {
+        console.error(`  - ${s.name}`);
+      }
+      process.exit(1);
+    }
+    targetStorageId = storage.id;
+    console.log(`Target storage ID: ${targetStorageId}\n`);
+  }
 
   // Get collection info
   const collection = await iconikRequest<{ title: string }>(`assets/v1/collections/${collectionId}/`);
@@ -113,69 +142,87 @@ async function main() {
     asset: Asset;
     proxyFormat?: Format;
     proxyFile?: File;
+    storageName?: string;
     originalPath?: string;
   }> = [];
 
-  for (const item of allAssets) {
-    const asset = await iconikRequest<Asset>(`assets/v1/assets/${item.id}/`);
+  for (let i = 0; i < allAssets.length; i++) {
+    const item = allAssets[i];
 
-    // Get formats
-    const formats = await iconikRequest<PaginatedResponse<Format>>(
-      `files/v1/assets/${asset.id}/formats/`
-    );
-
-    const proxyFormat = formats.objects?.find(f => f.name === 'PPRO_PROXY');
-
-    if (!proxyFormat) {
-      // No proxy format at all - might be non-video
-      continue;
+    if ((i + 1) % 50 === 0) {
+      process.stdout.write(`  Checking asset ${i + 1}/${allAssets.length}...\r`);
     }
 
-    // Get file sets for proxy format
-    const fileSets = await iconikRequest<PaginatedResponse<FileSet>>(
-      `files/v1/assets/${asset.id}/file_sets/?format_id=${proxyFormat.id}`
-    );
+    try {
+      const asset = await iconikRequest<Asset>(`assets/v1/assets/${item.id}/`);
 
-    // Look for file sets on Trick storage
-    const trickFileSet = fileSets.objects?.find(fs => fs.storage_id === trickStorageId);
+      // Get formats
+      const formats = await iconikRequest<PaginatedResponse<Format>>(
+        `files/v1/assets/${asset.id}/formats/`
+      );
 
-    if (!trickFileSet) {
-      continue;
-    }
+      // Find proxy format (case-insensitive partial match)
+      const proxyFormat = formats.objects?.find(f =>
+        f.name.toUpperCase().includes(formatName.toUpperCase())
+      );
 
-    // Get files in this file set
-    const files = await iconikRequest<PaginatedResponse<File>>(
-      `files/v1/assets/${asset.id}/files/?file_set_id=${trickFileSet.id}`
-    );
-
-    const proxyFile = files.objects?.[0];
-
-    if (proxyFile && proxyFile.status === 'MISSING') {
-      // Get original file path for context
-      const originalFormat = formats.objects?.find(f => f.name === 'ORIGINAL');
-      let originalPath = '';
-
-      if (originalFormat) {
-        const origFileSets = await iconikRequest<PaginatedResponse<FileSet>>(
-          `files/v1/assets/${asset.id}/file_sets/?format_id=${originalFormat.id}`
-        );
-        const origTrickFileSet = origFileSets.objects?.find(fs => fs.storage_id === trickStorageId);
-        if (origTrickFileSet) {
-          const origFiles = await iconikRequest<PaginatedResponse<File>>(
-            `files/v1/assets/${asset.id}/files/?file_set_id=${origTrickFileSet.id}`
-          );
-          if (origFiles.objects?.[0]) {
-            originalPath = origFiles.objects[0].directory_path + origFiles.objects[0].original_name;
-          }
-        }
+      if (!proxyFormat) {
+        continue;
       }
 
-      missingProxies.push({
-        asset,
-        proxyFormat,
-        proxyFile,
-        originalPath
-      });
+      // Get file sets for proxy format
+      const fileSets = await iconikRequest<PaginatedResponse<FileSet>>(
+        `files/v1/assets/${asset.id}/file_sets/?format_id=${proxyFormat.id}`
+      );
+
+      // Filter to target storage if specified
+      const targetFileSets = targetStorageId
+        ? fileSets.objects?.filter(fs => fs.storage_id === targetStorageId)
+        : fileSets.objects;
+
+      if (!targetFileSets || targetFileSets.length === 0) {
+        continue;
+      }
+
+      for (const fileSet of targetFileSets) {
+        // Get files in this file set
+        const files = await iconikRequest<PaginatedResponse<File>>(
+          `files/v1/assets/${asset.id}/files/?file_set_id=${fileSet.id}`
+        );
+
+        const proxyFile = files.objects?.[0];
+
+        if (proxyFile && proxyFile.status === 'MISSING') {
+          // Get original file path for context
+          const originalFormat = formats.objects?.find(f => f.name === 'ORIGINAL');
+          let originalPath = '';
+
+          if (originalFormat && targetStorageId) {
+            const origFileSets = await iconikRequest<PaginatedResponse<FileSet>>(
+              `files/v1/assets/${asset.id}/file_sets/?format_id=${originalFormat.id}`
+            );
+            const origFileSet = origFileSets.objects?.find(fs => fs.storage_id === targetStorageId);
+            if (origFileSet) {
+              const origFiles = await iconikRequest<PaginatedResponse<File>>(
+                `files/v1/assets/${asset.id}/files/?file_set_id=${origFileSet.id}`
+              );
+              if (origFiles.objects?.[0]) {
+                originalPath = origFiles.objects[0].directory_path + origFiles.objects[0].original_name;
+              }
+            }
+          }
+
+          missingProxies.push({
+            asset,
+            proxyFormat,
+            proxyFile,
+            storageName: storageMap.get(fileSet.storage_id),
+            originalPath
+          });
+        }
+      }
+    } catch (e) {
+      // Skip assets that can't be accessed
     }
   }
 
@@ -186,20 +233,13 @@ async function main() {
   for (const mp of missingProxies.slice(0, 20)) {
     console.log(`Asset: ${mp.asset.title}`);
     console.log(`  Asset ID: ${mp.asset.id}`);
-    console.log(`  Original: ${mp.originalPath}`);
+    console.log(`  Storage: ${mp.storageName}`);
+    if (mp.originalPath) {
+      console.log(`  Original: ${mp.originalPath}`);
+    }
     console.log(`  Proxy file: ${mp.proxyFile?.directory_path}${mp.proxyFile?.original_name}`);
     console.log(`  Proxy file ID: ${mp.proxyFile?.id}`);
-
-    // Calculate expected new path
-    if (mp.proxyFile) {
-      const oldPath = mp.proxyFile.directory_path + mp.proxyFile.original_name;
-      // Pattern: project/path/file_editproxy.ext -> project/_Proxies/path/file_Proxy.ext
-      const parts = oldPath.split('/');
-      const project = parts[0];
-      const rest = parts.slice(1).join('/');
-      const newPath = `${project}/_Proxies/${rest}`.replace('_editproxy', '_Proxy');
-      console.log(`  Expected new path: ${newPath}`);
-    }
+    console.log(`  Status: ${mp.proxyFile?.status}`);
     console.log('');
   }
 

@@ -3,14 +3,17 @@
 /**
  * FIX PROXY PATHS - Update missing proxy file paths to their new locations
  *
- * This script fixes proxy files that were moved by a server-side script:
+ * This script fixes proxy files that were moved by a server-side script.
+ * It transforms file paths based on configurable patterns.
+ *
+ * Default pattern (can be customized via --old-pattern and --new-pattern):
  * - Original: {project}/{path}/filename_editproxy.ext
  * - New:      {project}/_Proxies/{path}/filename_Proxy.ext
  *
  * Safety:
  * - Dry run by default (use --live to actually update)
  * - Only updates files with status MISSING
- * - Only updates files with "_editproxy" in the name
+ * - Only updates files matching the old pattern
  */
 
 import { iconikRequest, initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
@@ -23,11 +26,32 @@ const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const collectionId = args[0];
 const isLive = process.argv.includes('--live');
 
+// Parse optional flags
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const formatArg = process.argv.find(a => a.startsWith('--format='));
+const oldPatternArg = process.argv.find(a => a.startsWith('--old-pattern='));
+const newPatternArg = process.argv.find(a => a.startsWith('--new-pattern='));
+const newDirArg = process.argv.find(a => a.startsWith('--new-dir='));
+
+const storageName = storageArg?.split('=')[1];
+const formatName = formatArg?.split('=')[1] || 'PROXY';
+const oldPattern = oldPatternArg?.split('=')[1] || '_editproxy';
+const newPattern = newPatternArg?.split('=')[1] || '_Proxy';
+const newProxyDir = newDirArg?.split('=')[1] || '_Proxies';
+
 if (!collectionId) {
-  console.error('Usage: npx tsx scripts/fix-proxy-paths.ts <collection_id> --profile=name [--live]');
+  console.error('Usage: npx tsx scripts/fix-proxy-paths.ts <collection_id> --profile=name [options]');
   console.error('');
   console.error('Options:');
-  console.error('  --live    Actually update files (default is dry run)');
+  console.error('  --live              Actually update files (default is dry run)');
+  console.error('  --storage=NAME      Storage to check for missing files');
+  console.error('  --format=NAME       Proxy format name to look for (default: PROXY)');
+  console.error('  --old-pattern=STR   Pattern to match in filenames (default: _editproxy)');
+  console.error('  --new-pattern=STR   Replacement pattern for filenames (default: _Proxy)');
+  console.error('  --new-dir=NAME      New subdirectory for proxies (default: _Proxies)');
+  console.error('');
+  console.error('Example:');
+  console.error('  npx tsx scripts/fix-proxy-paths.ts abc123 --profile=myprofile --storage=MyStorage --live');
   process.exit(1);
 }
 
@@ -75,15 +99,15 @@ interface PaginatedResponse<T> {
 }
 
 function transformPath(oldPath: string, oldName: string): { newPath: string; newName: string } | null {
-  // Only transform files with _editproxy in the name
-  if (!oldName.toLowerCase().includes('_editproxy')) {
+  // Only transform files matching the old pattern
+  if (!oldName.toLowerCase().includes(oldPattern.toLowerCase())) {
     return null;
   }
 
-  // Transform filename: replace _editproxy with _Proxy
-  const newName = oldName.replace(/_editproxy/gi, '_Proxy');
+  // Transform filename: replace old pattern with new pattern
+  const newName = oldName.replace(new RegExp(oldPattern, 'gi'), newPattern);
 
-  // Transform path: {project}/{rest} -> {project}/_Proxies/{rest}
+  // Transform path: {project}/{rest} -> {project}/{newProxyDir}/{rest}
   const pathParts = oldPath.split('/');
   if (pathParts.length < 1) {
     return null;
@@ -92,8 +116,8 @@ function transformPath(oldPath: string, oldName: string): { newPath: string; new
   const project = pathParts[0];
   const rest = pathParts.slice(1).join('/');
 
-  // New path: project/_Proxies/rest (or just project/_Proxies if no rest)
-  const newPath = rest ? `${project}/_Proxies/${rest}` : `${project}/_Proxies`;
+  // New path: project/newProxyDir/rest (or just project/newProxyDir if no rest)
+  const newPath = rest ? `${project}/${newProxyDir}/${rest}` : `${project}/${newProxyDir}`;
 
   return { newPath, newName };
 }
@@ -107,18 +131,28 @@ async function main() {
   console.log(`Profile: ${profile.name}`);
   console.log(`Collection: ${collectionId}`);
   console.log(`Mode: ${isLive ? '🔴 LIVE - WILL UPDATE FILES' : '🟡 DRY RUN - No files will be updated'}`);
+  console.log(`Storage: ${storageName || '(all storages)'}`);
+  console.log(`Format: ${formatName}`);
+  console.log(`Pattern: ${oldPattern} → ${newPattern}`);
+  console.log(`New directory: ${newProxyDir}`);
   console.log(`${"═".repeat(70)}\n`);
 
   // Get storages
   const storages = await iconikRequest<PaginatedResponse<Storage>>('files/v1/storages/');
-  const trickStorageId = storages.objects.find(s => s.name === 'Trick')?.id;
 
-  if (!trickStorageId) {
-    console.error('Could not find Trick storage');
-    process.exit(1);
+  let targetStorageId: string | undefined;
+  if (storageName) {
+    const storage = storages.objects.find(s => s.name === storageName);
+    if (!storage) {
+      console.error(`Storage '${storageName}' not found. Available storages:`);
+      for (const s of storages.objects) {
+        console.error(`  - ${s.name}`);
+      }
+      process.exit(1);
+    }
+    targetStorageId = storage.id;
+    console.log(`Target storage ID: ${targetStorageId}\n`);
   }
-
-  console.log(`Trick storage ID: ${trickStorageId}\n`);
 
   // Get collection info
   const collection = await iconikRequest<{ title: string }>(`assets/v1/collections/${collectionId}/`);
@@ -173,39 +207,42 @@ async function main() {
         `files/v1/assets/${asset.id}/formats/`
       );
 
-      const proxyFormat = formats.objects?.find(f => f.name === 'PPRO_PROXY');
+      // Find proxy format (case-insensitive partial match)
+      const proxyFormat = formats.objects?.find(f =>
+        f.name.toUpperCase().includes(formatName.toUpperCase())
+      );
 
       if (!proxyFormat) {
         continue;
       }
 
-      // Get file sets for proxy format on Trick storage
+      // Get file sets for proxy format
       const fileSets = await iconikRequest<PaginatedResponse<FileSet>>(
         `files/v1/assets/${asset.id}/file_sets/?format_id=${proxyFormat.id}`
       );
 
-      // Find file sets with _editproxy in the name (these need fixing)
-      const editProxyFileSets = fileSets.objects?.filter(fs =>
-        fs.storage_id === trickStorageId &&
-        fs.name?.toLowerCase().includes('_editproxy')
-      ) || [];
+      // Find file sets matching the old pattern (these need fixing)
+      const matchingFileSets = fileSets.objects?.filter(fs => {
+        if (targetStorageId && fs.storage_id !== targetStorageId) return false;
+        return fs.name?.toLowerCase().includes(oldPattern.toLowerCase());
+      }) || [];
 
-      for (const fileSet of editProxyFileSets) {
+      for (const fileSet of matchingFileSets) {
         // Get files in this file set
         const files = await iconikRequest<PaginatedResponse<File>>(
           `files/v1/assets/${asset.id}/files/?file_set_id=${fileSet.id}`
         );
 
-        // Find the proxy file (with _editproxy in name)
+        // Find the proxy file matching the old pattern
         const proxyFile = files.objects?.find(f =>
-          f.original_name?.toLowerCase().includes('_editproxy')
+          f.original_name?.toLowerCase().includes(oldPattern.toLowerCase())
         );
 
         if (!proxyFile) {
           continue;
         }
 
-        // Count all missing files (not just editproxy ones)
+        // Count all missing files
         if (proxyFile.status === 'MISSING') {
           totalMissing++;
         }
@@ -267,7 +304,7 @@ async function main() {
   console.log(`${"═".repeat(70)}`);
   console.log(`Assets checked: ${allAssets.length}`);
   console.log(`Missing proxy files found: ${totalMissing}`);
-  console.log(`Fixable (with _editproxy pattern): ${fixable}`);
+  console.log(`Fixable (matching '${oldPattern}' pattern): ${fixable}`);
 
   if (isLive) {
     console.log(`Files updated: ${fixed}`);

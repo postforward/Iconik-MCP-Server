@@ -33,3 +33,7 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+
+# Local workflow-specific scripts (not for public repo)
+scripts/check-archive-leftovers.ts
+scripts/cleanup-trick-after-archive.ts
