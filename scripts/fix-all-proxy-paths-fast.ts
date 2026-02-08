@@ -160,10 +160,9 @@ async function main() {
   let totalFound = 0;
   let totalFixed = 0;
   let totalErrors = 0;
+  let consecutiveNoEditProxy = 0;
   const processedAssets = new Set<string>();
-
-  let page = 1;
-  const maxPages = 10000;
+  const processedFileIds = new Set<string>(); // Track file IDs we've seen to detect when we've looped
 
   console.log('Scanning Trick storage for MISSING editproxy files...\n');
 
@@ -172,9 +171,11 @@ async function main() {
     `files/v1/storages/${trickStorage.id}/files/?per_page=100&page=1&status=MISSING`
   );
 
-  if (firstPage.total) {
-    console.log(`Total MISSING files on Trick storage: ${firstPage.total.toLocaleString()}\n`);
-  }
+  const initialTotal = firstPage.total || 0;
+  console.log(`Total MISSING files on Trick storage: ${initialTotal.toLocaleString()}\n`);
+
+  let page = 1;
+  const maxPages = Math.ceil(initialTotal / 100) + 10;
 
   while (page <= maxPages) {
     try {
@@ -182,7 +183,24 @@ async function main() {
         `files/v1/storages/${trickStorage.id}/files/?per_page=100&page=${page}&status=MISSING`
       );
 
-      if (!files.objects || files.objects.length === 0) break;
+      if (!files.objects || files.objects.length === 0) {
+        console.log(`Page ${page} is empty - finished scanning`);
+        break;
+      }
+
+      // Check if we've seen these files before (means we've looped around)
+      const firstFileId = files.objects[0]?.id;
+      if (firstFileId && processedFileIds.has(firstFileId)) {
+        console.log('Detected loop in pagination - restarting from page 1');
+        page = 1;
+        processedFileIds.clear();
+        continue;
+      }
+
+      // Track file IDs we've seen
+      for (const file of files.objects) {
+        if (file.id) processedFileIds.add(file.id);
+      }
 
       totalScanned += files.objects.length;
 
@@ -195,9 +213,17 @@ async function main() {
         return true;
       });
 
-      totalFound += editProxyFiles.length;
+      if (editProxyFiles.length === 0) {
+        consecutiveNoEditProxy++;
+        // If we've gone through 50 pages (5000 files) without finding any editproxy files, we're probably done
+        if (consecutiveNoEditProxy >= 50) {
+          console.log('No editproxy files found in last 50 pages - assuming complete');
+          break;
+        }
+      } else {
+        consecutiveNoEditProxy = 0;
+        totalFound += editProxyFiles.length;
 
-      if (editProxyFiles.length > 0) {
         // Process in batches of CONCURRENCY
         for (let i = 0; i < editProxyFiles.length; i += CONCURRENCY) {
           const batch = editProxyFiles.slice(i, i + CONCURRENCY);
@@ -207,18 +233,30 @@ async function main() {
         }
       }
 
-      // Progress update every 5 pages
-      if (page % 5 === 0) {
+      // Progress update every 10 pages
+      if (page % 10 === 0) {
         const elapsed = Math.round((Date.now() - startTime.getTime()) / 1000);
-        const rate = totalFixed / (elapsed / 60);
-        console.log(`[Page ${page}] Scanned: ${totalScanned.toLocaleString()} | Found: ${totalFound} | Fixed: ${totalFixed} | Errors: ${totalErrors} | ${elapsed}s elapsed | ${rate.toFixed(1)}/min`);
+        const rate = totalFixed > 0 ? totalFixed / (elapsed / 60) : 0;
+        const currentTotal = files.total || 0;
+        console.log(`[Page ${page}] Scanned: ${totalScanned.toLocaleString()} | Found: ${totalFound} | Fixed: ${totalFixed} | Errors: ${totalErrors} | MISSING remaining: ${currentTotal} | ${elapsed}s | ${rate.toFixed(1)}/min`);
       }
 
-      if (!files.pages || page >= files.pages) break;
       page++;
+
     } catch (e) {
-      console.log(`Error on page ${page}: ${e instanceof Error ? e.message : e}`);
-      page++;
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      if (errorMsg.includes('Page') && errorMsg.includes('does not exist')) {
+        // Page doesn't exist anymore - files were fixed, restart from page 1
+        console.log(`Page ${page} no longer exists - restarting from page 1`);
+        page = 1;
+        processedFileIds.clear();
+        consecutiveNoEditProxy = 0;
+      } else {
+        console.log(`Error on page ${page}: ${errorMsg}`);
+        page++;
+      }
+      // Small delay before retry
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 
