@@ -1,0 +1,21 @@
+{
+  "default_profile": "production",
+  "profiles": {
+    "production": {
+      "name": "Production Domain",
+      "app_id": "your-production-app-id",
+      "auth_token": "your-production-auth-token"
+    },
+    "staging": {
+      "name": "Staging Domain",
+      "app_id": "your-staging-app-id",
+      "auth_token": "your-staging-auth-token",
+      "api_url": "https://preview.iconik.cloud/API/"
+    },
+    "development": {
+      "name": "Development Domain",
+      "app_id": "your-dev-app-id",
+      "auth_token": "your-dev-auth-token"
+    }
+  }
+}
