@@ -93,6 +93,20 @@ async function main() {
             body: JSON.stringify({ archive_status: 'ARCHIVED' })
           });
           console.log(`  ✅ Fixed asset archive_status -> ARCHIVED`);
+
+          // Fix all format statuses too (this is what the Files view shows)
+          const formats = await iconikRequest<PaginatedResponse<Format>>(
+            `files/v1/assets/${assetId}/formats/`
+          );
+          for (const format of formats.objects || []) {
+            if (format.archive_status !== 'ARCHIVED') {
+              await iconikRequest(`files/v1/assets/${assetId}/formats/${format.id}/`, {
+                method: 'PATCH',
+                body: JSON.stringify({ archive_status: 'ARCHIVED' })
+              });
+              console.log(`  ✅ Fixed format ${format.name} archive_status -> ARCHIVED`);
+            }
+          }
           fixed++;
         }
       } else if (!hasArchive) {
