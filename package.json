@@ -1,10 +1,10 @@
 {
-  "name": "mcp-iconik",
+  "name": "iconik-mcp-server",
   "version": "1.0.0",
   "description": "MCP server for Iconik media asset management API",
   "main": "dist/index.js",
   "bin": {
-    "mcp-iconik": "./dist/index.js"
+    "iconik-mcp-server": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

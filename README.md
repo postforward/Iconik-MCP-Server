@@ -1,4 +1,4 @@
-# MCP-Iconik
+# Iconik-MCP-Server
 
 A Model Context Protocol (MCP) server for the [Iconik](https://iconik.io) media asset management API. This enables AI assistants like Claude to interact with your Iconik media library.
 
@@ -13,8 +13,8 @@ A Model Context Protocol (MCP) server for the [Iconik](https://iconik.io) media 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/mcp-iconik.git
-cd mcp-iconik
+git clone https://github.com/postforward/Iconik-MCP-Server.git
+cd Iconik-MCP-Server
 
 # Install dependencies
 npm install
@@ -79,7 +79,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
   "mcpServers": {
     "iconik": {
       "command": "node",
-      "args": ["/path/to/mcp-iconik/dist/index.js"],
+      "args": ["/path/to/Iconik-MCP-Server/dist/index.js"],
       "env": {
         "ICONIK_APP_ID": "your-app-id",
         "ICONIK_AUTH_TOKEN": "your-auth-token"
