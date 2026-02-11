@@ -16,7 +16,7 @@ import { registerSegmentTools } from "./tools/segments.js";
 
 // Create server instance
 const server = new McpServer({
-  name: "iconik-mcp-server",
+  name: "Iconik-MCP-Server",
   version: "1.0.0",
 });
 
