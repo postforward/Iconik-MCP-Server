@@ -34,6 +34,9 @@ coverage/
 *.tmp
 *.temp
 
+# Claude Code project instructions
+CLAUDE.md
+
 # Local workflow-specific scripts (not for public repo)
 scripts/check-archive-leftovers.ts
 scripts/cleanup-trick-after-archive.ts
