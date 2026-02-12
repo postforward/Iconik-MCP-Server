@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { iconikRequest, buildQueryString } from "../client.js";
+import type { PaginatedResponse, Asset } from "../types/iconik.js";
 
 export function registerCollectionTools(server: McpServer) {
   server.tool(
@@ -219,6 +220,88 @@ export function registerCollectionTools(server: McpServer) {
       );
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "check_collection_archive_health",
+    "Scan a collection and report archive health: group assets by archive_status, flag ARCHIVING stuck >24h, list FAILED_TO_ARCHIVE assets.",
+    {
+      collection_id: z.string().uuid().describe("The collection UUID to scan"),
+    },
+    async ({ collection_id }) => {
+      const statusCounts: Record<string, number> = {};
+      const stuckArchiving: { id: string; title: string; date_modified: string }[] = [];
+      const failedToArchive: { id: string; title: string }[] = [];
+      const now = Date.now();
+      const twentyFourHoursMs = 24 * 60 * 60 * 1000;
+
+      let page = 1;
+      const perPage = 100;
+      let hasMore = true;
+      let totalAssets = 0;
+
+      interface CollectionContent {
+        id: string;
+        object_type: string;
+      }
+
+      while (hasMore) {
+        const contentsResponse = await iconikRequest<PaginatedResponse<CollectionContent>>(
+          `assets/v1/collections/${collection_id}/contents/?page=${page}&per_page=${perPage}&content_types=assets`
+        );
+
+        const items = contentsResponse.objects || [];
+
+        for (const item of items) {
+          if (item.object_type !== "assets") continue;
+          totalAssets++;
+
+          try {
+            const asset = await iconikRequest<Asset>(
+              `assets/v1/assets/${item.id}/`
+            );
+
+            const status = asset.archive_status || "NOT_ARCHIVED";
+            statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+            if (status === "ARCHIVING") {
+              const modified = new Date(asset.date_modified).getTime();
+              if (now - modified > twentyFourHoursMs) {
+                stuckArchiving.push({
+                  id: asset.id,
+                  title: asset.title,
+                  date_modified: asset.date_modified,
+                });
+              }
+            }
+
+            if (status === "FAILED_TO_ARCHIVE") {
+              failedToArchive.push({ id: asset.id, title: asset.title });
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            statusCounts["ERROR"] = (statusCounts["ERROR"] || 0) + 1;
+            // Log but continue processing
+            console.error(`Error fetching asset ${item.id}: ${msg}`);
+          }
+        }
+
+        hasMore = contentsResponse.pages > page;
+        page++;
+      }
+
+      const report = {
+        collection_id,
+        total_assets: totalAssets,
+        archive_status_counts: statusCounts,
+        stuck_archiving_over_24h: stuckArchiving,
+        failed_to_archive: failedToArchive,
+      };
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }],
       };
     }
   );

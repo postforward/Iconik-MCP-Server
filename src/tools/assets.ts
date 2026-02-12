@@ -737,6 +737,90 @@ export function registerAssetTools(server: McpServer) {
     }
   );
 
+  server.tool(
+    "list_file_set_files",
+    "List all file records in a specific file set",
+    {
+      asset_id: z.string().uuid().describe("The asset UUID"),
+      file_set_id: z.string().uuid().describe("The file set UUID"),
+    },
+    async ({ asset_id, file_set_id }) => {
+      const result = await iconikRequest<PaginatedResponse<IconikFile>>(
+        `files/v1/assets/${asset_id}/file_sets/${file_set_id}/files/`
+      );
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "get_asset_file_set_details",
+    "Get a combined view of all file sets for an asset with storage names and file records",
+    {
+      asset_id: z.string().uuid().describe("The asset UUID"),
+    },
+    async ({ asset_id }) => {
+      const storageCache = new Map<string, string>();
+
+      const fileSetsResponse = await iconikRequest<PaginatedResponse<FileSet>>(
+        `files/v1/assets/${asset_id}/file_sets/`
+      );
+      const fileSets = fileSetsResponse.objects || [];
+
+      const details = [];
+      for (const fs of fileSets) {
+        // Resolve storage name
+        let storageName = storageCache.get(fs.storage_id);
+        if (!storageName) {
+          try {
+            const storage = await iconikRequest<{ id: string; name: string }>(
+              `files/v1/storages/${fs.storage_id}/`
+            );
+            storageName = storage.name;
+          } catch {
+            storageName = "(unknown)";
+          }
+          storageCache.set(fs.storage_id, storageName);
+        }
+
+        // Get file records for this file set
+        let files: IconikFile[] = [];
+        try {
+          const filesResponse = await iconikRequest<PaginatedResponse<IconikFile>>(
+            `files/v1/assets/${asset_id}/file_sets/${fs.id}/files/`
+          );
+          files = filesResponse.objects || [];
+        } catch {
+          // file set may have no files endpoint; continue
+        }
+
+        details.push({
+          file_set_id: fs.id,
+          format_id: fs.format_id,
+          storage_id: fs.storage_id,
+          storage_name: storageName,
+          name: fs.name,
+          status: fs.status,
+          base_dir: fs.base_dir,
+          date_created: fs.date_created,
+          files: files.map((f) => ({
+            id: f.id,
+            name: f.name,
+            original_name: f.original_name,
+            size: f.size,
+            status: f.status,
+            directory_path: f.directory_path,
+          })),
+        });
+      }
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+      };
+    }
+  );
+
   // ============================================
   // FILES & DOWNLOADS
   // ============================================
@@ -803,6 +887,52 @@ export function registerAssetTools(server: McpServer) {
     async ({ asset_id, file_id }) => {
       const result = await iconikRequest(
         `files/v1/assets/${asset_id}/files/${file_id}/mediainfo/`
+      );
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "create_file_record",
+    "Create a file record in an asset's file set. Looks up the file set to resolve format_id and storage_id automatically.",
+    {
+      asset_id: z.string().uuid().describe("The asset UUID"),
+      file_set_id: z.string().uuid().describe("The file set UUID to add the file to"),
+      name: z.string().describe("File name (e.g., 'video.mxf')"),
+      original_name: z.string().optional().describe("Original file name"),
+      size: z.number().optional().describe("File size in bytes"),
+      directory_path: z.string().optional().describe("Directory path within the storage"),
+      status: z
+        .enum(["ACTIVE", "CLOSED", "DELETED"])
+        .optional()
+        .default("CLOSED")
+        .describe("File status"),
+    },
+    async ({ asset_id, file_set_id, name, original_name, size, directory_path, status }) => {
+      // Look up file set to resolve format_id and storage_id
+      const fileSet = await iconikRequest<FileSet>(
+        `files/v1/assets/${asset_id}/file_sets/${file_set_id}/`
+      );
+
+      const body: Record<string, unknown> = {
+        file_set_id,
+        format_id: fileSet.format_id,
+        storage_id: fileSet.storage_id,
+        name,
+        original_name: original_name || name,
+        size,
+        directory_path,
+        status,
+      };
+
+      const result = await iconikRequest<IconikFile>(
+        `files/v1/assets/${asset_id}/files/`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        }
       );
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -1058,6 +1188,62 @@ export function registerAssetTools(server: McpServer) {
       );
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "update_archive_status",
+    "Bulk update archive_status on assets and all their formats. Useful for resetting stuck ARCHIVING states.",
+    {
+      asset_ids: z.array(z.string().uuid()).describe("Array of asset UUIDs to update"),
+      archive_status: z
+        .enum(["NOT_ARCHIVED", "ARCHIVING", "FAILED_TO_ARCHIVE", "ARCHIVED"])
+        .describe("The new archive_status to set"),
+    },
+    async ({ asset_ids, archive_status }) => {
+      const logs: string[] = [];
+      logs.push(`Updating archive_status to "${archive_status}" for ${asset_ids.length} asset(s)`);
+      logs.push("");
+
+      for (const assetId of asset_ids) {
+        try {
+          // Update the asset itself
+          await iconikRequest<Asset>(`assets/v1/assets/${assetId}/`, {
+            method: "PATCH",
+            body: JSON.stringify({ archive_status }),
+          });
+          logs.push(`Asset ${assetId}: updated`);
+
+          // Get all formats and update each
+          const formatsResponse = await iconikRequest<PaginatedResponse<Format>>(
+            `files/v1/assets/${assetId}/formats/`
+          );
+          const formats = formatsResponse.objects || [];
+
+          for (const fmt of formats) {
+            try {
+              await iconikRequest(
+                `files/v1/assets/${assetId}/formats/${fmt.id}/`,
+                {
+                  method: "PATCH",
+                  body: JSON.stringify({ archive_status }),
+                }
+              );
+              logs.push(`  Format ${fmt.id} (${fmt.name}): updated`);
+            } catch (fmtErr) {
+              const msg = fmtErr instanceof Error ? fmtErr.message : String(fmtErr);
+              logs.push(`  Format ${fmt.id} (${fmt.name}): ERROR - ${msg}`);
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logs.push(`Asset ${assetId}: ERROR - ${msg}`);
+        }
+      }
+
+      return {
+        content: [{ type: "text" as const, text: logs.join("\n") }],
       };
     }
   );

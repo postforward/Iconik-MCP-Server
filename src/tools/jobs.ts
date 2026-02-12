@@ -2,6 +2,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { iconikRequest, buildQueryString } from "../client.js";
 
+const jobStatusEnum = z.enum([
+  "PENDING", "WAITING", "STARTED", "IN_PROGRESS",
+  "FINISHED", "FAILED", "ABORTED", "SKIPPED",
+]);
+
 export function registerJobTools(server: McpServer) {
   server.tool(
     "list_jobs",
@@ -9,14 +14,33 @@ export function registerJobTools(server: McpServer) {
     {
       page: z.number().optional().default(1),
       per_page: z.number().optional().default(20),
-      status: z
-        .enum(["PENDING", "IN_PROGRESS", "FINISHED", "FAILED", "ABORTED"])
+      status: jobStatusEnum
         .optional()
         .describe("Filter by job status"),
       type: z.string().optional().describe("Filter by job type"),
     },
     async ({ page, per_page, status, type }) => {
       const query = buildQueryString({ page, per_page, status, type });
+      const result = await iconikRequest(`jobs/v1/jobs/${query}`);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "list_child_jobs",
+    "List child jobs of a parent job",
+    {
+      parent_id: z.string().uuid().describe("The parent job UUID"),
+      status: jobStatusEnum
+        .optional()
+        .describe("Filter by job status"),
+      page: z.number().optional().default(1),
+      per_page: z.number().optional().default(20),
+    },
+    async ({ parent_id, status, page, per_page }) => {
+      const query = buildQueryString({ parent_id, status, page, per_page });
       const result = await iconikRequest(`jobs/v1/jobs/${query}`);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -45,8 +69,9 @@ export function registerJobTools(server: McpServer) {
       job_id: z.string().uuid().describe("The job UUID to abort"),
     },
     async ({ job_id }) => {
-      const result = await iconikRequest(`jobs/v1/jobs/${job_id}/abort/`, {
-        method: "POST",
+      const result = await iconikRequest(`jobs/v1/jobs/${job_id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "ABORTED" }),
       });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
