@@ -1,0 +1,17 @@
+services:
+  iconik-mcp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MCP_TRANSPORT=http
+      - MCP_PORT=8000
+      - MCP_ACCESS_LEVEL=${MCP_ACCESS_LEVEL:-read}
+      - ICONIK_APP_ID
+      - ICONIK_AUTH_TOKEN
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
