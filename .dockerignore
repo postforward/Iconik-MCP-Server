@@ -2,8 +2,11 @@
 node_modules
 dist
 scripts/
+deploy/
 .env
+.env.*
 iconik-config.json
+.iconik-config.json
 .claude/
 *.md
 .gitignore

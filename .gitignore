@@ -37,6 +37,9 @@ coverage/
 # Claude Code project instructions
 CLAUDE.md
 
+# Client deployment configs (contain credentials)
+deploy/
+
 # Local workflow-specific scripts (not for public repo)
 scripts/check-archive-leftovers.ts
 scripts/cleanup-trick-after-archive.ts
