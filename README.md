@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server for the [Iconik](https://iconik.io) media 
 
 ## Features
 
-- **45+ MCP Tools** - Comprehensive coverage of the Iconik API
+- **143 MCP Tools** - Comprehensive coverage of the Iconik API
 - **Multi-Profile Support** - Manage multiple Iconik domains/accounts
 - **Standalone Scripts** - CLI tools for common bulk operations
 - **Dry Run Mode** - Safely preview destructive operations
@@ -70,6 +70,70 @@ ICONIK_APP_ID=your-app-id
 ICONIK_AUTH_TOKEN=your-auth-token
 ```
 
+## Running
+
+### Stdio (default)
+
+For local use with Claude Code, Cursor, Claude Desktop, and other MCP clients:
+
+```bash
+node dist/index.js
+```
+
+### HTTP
+
+For remote or containerized deployment via Streamable HTTP:
+
+```bash
+MCP_TRANSPORT=http node dist/index.js
+```
+
+Endpoints:
+- `POST /mcp` — MCP protocol (new session or existing via `mcp-session-id` header)
+- `GET /mcp` — SSE stream for existing session
+- `DELETE /mcp` — Close session
+- `GET /health` — Health check
+
+## Access Levels
+
+`MCP_ACCESS_LEVEL` controls which tools are registered at startup. Defaults to `read` for safety.
+
+| Level       | Tools                          | Count |
+|-------------|--------------------------------|-------|
+| `read`      | list, get, search, check       | 85    |
+| `readwrite` | read + create, update, bulk    | 126   |
+| `full`      | readwrite + delete, purge      | 143   |
+
+```bash
+# Read-only (default)
+node dist/index.js
+
+# Read + write
+MCP_ACCESS_LEVEL=readwrite node dist/index.js
+
+# Full access
+MCP_ACCESS_LEVEL=full node dist/index.js
+```
+
+## Docker
+
+```bash
+# Build and run (read-only by default)
+docker compose up --build
+
+# With write access
+MCP_ACCESS_LEVEL=readwrite docker compose up --build
+
+# Full access
+MCP_ACCESS_LEVEL=full docker compose up --build
+```
+
+Environment variables:
+- `ICONIK_APP_ID` (required)
+- `ICONIK_AUTH_TOKEN` (required)
+- `MCP_ACCESS_LEVEL` (default `read`)
+- `MCP_PORT` (default `8000`)
+
 ## Usage with Claude Desktop
 
 Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
@@ -82,7 +146,8 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
       "args": ["/path/to/Iconik-MCP-Server/dist/index.js"],
       "env": {
         "ICONIK_APP_ID": "your-app-id",
-        "ICONIK_AUTH_TOKEN": "your-auth-token"
+        "ICONIK_AUTH_TOKEN": "your-auth-token",
+        "MCP_ACCESS_LEVEL": "readwrite"
       }
     }
   }
