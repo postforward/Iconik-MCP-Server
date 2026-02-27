@@ -1,5 +1,13 @@
 #!/usr/bin/env npx ts-node
 
+/**
+ * AUDIT FAILED ARCHIVES
+ *
+ * Scans for assets with FAILED_TO_ARCHIVE status and provides diagnostics
+ * including format issues, file set problems, storage connectivity, and
+ * archive job history. Exports results to a JSON report.
+ */
+
 import "dotenv/config";
 
 const ICONIK_API_BASE = "https://app.iconik.io/API/";

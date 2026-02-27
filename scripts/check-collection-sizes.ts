@@ -1,5 +1,12 @@
 #!/usr/bin/env npx tsx
 
+/**
+ * CHECK COLLECTION SIZES
+ *
+ * Lists all assets in a collection with their file information including
+ * file names, sizes, and status. Useful for inspecting collection contents.
+ */
+
 import { iconikRequest, initializeProfile } from "../src/client.ts";
 import { getProfileFromArgs } from "../src/config.ts";
 

@@ -1,3 +1,10 @@
+/**
+ * TEST FACETS
+ *
+ * Test script for the Iconik search API facets. Performs a basic search
+ * query and logs the facets structure returned by the API.
+ */
+
 import "dotenv/config";
 
 async function test() {

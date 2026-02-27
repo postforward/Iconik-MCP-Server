@@ -1,5 +1,13 @@
 #!/usr/bin/env npx ts-node
 
+/**
+ * DELETE PROXIES
+ *
+ * Deletes proxy files by collection or by storage. Discovers assets and
+ * processes them in phases with a detailed summary. Supports dry-run and
+ * live modes.
+ */
+
 import { iconikRequest, initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
 import { getProfileFromArgs } from "../src/config.ts";
 

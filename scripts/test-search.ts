@@ -1,3 +1,11 @@
+/**
+ * TEST SEARCH
+ *
+ * Test script for Iconik search API filter syntax. Tests multiple filter
+ * format variations (operator/terms vs array format) and logs results
+ * for debugging search capabilities.
+ */
+
 import "dotenv/config";
 
 async function test() {
