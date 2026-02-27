@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 
 /**
- * Fix orphaned Mortar file sets with parallelization
+ * Fix orphaned file sets with parallelization
  * Recursively processes collections and runs multiple assets in parallel
  */
 
@@ -15,12 +15,15 @@ initializeProfile(profileName);
 
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const collectionId = args[0];
-const mountPath = args[1] || '/Volumes/mortar';
+const mountPath = args[1] || '/mnt/storage';
 const isLive = process.argv.includes('--live');
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const storageName = storageArg?.split('=')[1];
 const CONCURRENCY = 10; // Process 10 assets at a time
 
-if (!collectionId) {
-  console.error('Usage: npx tsx scripts/fix-orphaned-with-sizes-parallel.ts <collection_id> [mount_path] --profile=name [--live]');
+if (!collectionId || !storageName) {
+  console.error('Usage: npx tsx scripts/fix-orphaned-with-sizes-parallel.ts <collection_id> [mount_path] --storage=NAME --profile=<name> [--live]');
+  console.error('  mount_path defaults to /mnt/storage');
   process.exit(1);
 }
 
@@ -101,7 +104,7 @@ async function getAllAssets(collectionId: string, depth = 0): Promise<string[]> 
 
 async function processAsset(
   assetId: string,
-  mortarStorageId: string,
+  targetStorageId: string,
   stats: Stats
 ): Promise<void> {
   try {
@@ -110,9 +113,9 @@ async function processAsset(
       iconikRequest<{ objects: FileRecord[] }>(`files/v1/assets/${assetId}/files/`)
     ]);
 
-    const mortarFileSets = fileSetsRes.objects?.filter(fs => fs.storage_id === mortarStorageId) || [];
+    const targetFileSets = fileSetsRes.objects?.filter(fs => fs.storage_id === targetStorageId) || [];
 
-    for (const fs of mortarFileSets) {
+    for (const fs of targetFileSets) {
       const existingFile = filesRes.objects?.find(f => f.file_set_id === fs.id);
       const fileSize = getFileSize(fs.base_dir, fs.name);
 
@@ -213,16 +216,19 @@ async function main() {
 
   const collection = await iconikRequest<{ title: string }>(`assets/v1/collections/${collectionId}/`);
   console.log('Collection:', collection.title);
+  console.log('Storage:', storageName);
   console.log('Mount path:', mountPath);
   console.log('Concurrency:', CONCURRENCY);
   console.log('Mode:', isLive ? '🔴 LIVE' : '🟡 DRY RUN');
   console.log('');
 
   const storages = await iconikRequest<{ objects: Storage[] }>('files/v1/storages/');
-  const mortarStorage = storages.objects.find(s => s.name === 'Mortar');
+  const targetStorage = storages.objects.find(s => s.name === storageName);
 
-  if (!mortarStorage) {
-    console.error('Mortar storage not found');
+  if (!targetStorage) {
+    console.error(`Storage "${storageName}" not found`);
+    console.error('Available storages:');
+    storages.objects.forEach(s => console.error(`  - ${s.name}`));
     process.exit(1);
   }
 
@@ -239,7 +245,7 @@ async function main() {
   };
 
   await processInBatches(assetIds, CONCURRENCY, async (assetId) => {
-    await processAsset(assetId, mortarStorage.id, stats);
+    await processAsset(assetId, targetStorage.id, stats);
   });
 
   console.log('\n' + '═'.repeat(50));

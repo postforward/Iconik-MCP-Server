@@ -23,8 +23,8 @@ Options:
   --archive-issues    Only show assets with archive failures or stuck archiving
 
 Examples:
-  npx tsx scripts/check-collection.ts abc-123-def --profile=tm
-  npx tsx scripts/check-collection.ts abc-123-def --profile=tm --archive-issues
+  npx tsx scripts/check-collection.ts abc-123-def --profile=<name>
+  npx tsx scripts/check-collection.ts abc-123-def --profile=<name> --archive-issues
 `);
   process.exit(1);
 }

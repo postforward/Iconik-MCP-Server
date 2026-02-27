@@ -12,7 +12,7 @@ const profileName = getProfileFromArgs();
 initializeProfile(profileName);
 
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
-const storageName = args[0] || 'priv-client-finals-primary-google';
+const storageName = args[0];
 const maxAgeDays = parseInt(args[1] || '90', 10);
 const isLive = process.argv.includes('--live');
 
@@ -30,6 +30,11 @@ interface FileRecord {
   date_created: string;
   status: string;
   size: number;
+}
+
+if (!storageName) {
+  console.error('Usage: npx tsx scripts/cleanup-expired-delivery-files.ts <storage_name> [max_age_days] --profile=<name> [--live]');
+  process.exit(1);
 }
 
 async function main() {

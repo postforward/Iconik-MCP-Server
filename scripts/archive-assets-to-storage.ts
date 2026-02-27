@@ -21,12 +21,12 @@
  * Dry-run by default. Add --live to apply changes.
  *
  * Usage:
- *   npx tsx scripts/archive-assets-to-storage.ts --profile=tm \
- *     --source-mount=/Volumes/trick --archive-mount=/Volumes/mortar \
+ *   npx tsx scripts/archive-assets-to-storage.ts --profile=<name> \
+ *     --source-mount=/mnt/source --archive-mount=/mnt/archive \
  *     --archive-storage=<storage_id> <asset_id> [...]
  *
- *   npx tsx scripts/archive-assets-to-storage.ts --profile=tm \
- *     --source-mount=/Volumes/trick --archive-mount=/Volumes/mortar \
+ *   npx tsx scripts/archive-assets-to-storage.ts --profile=<name> \
+ *     --source-mount=/mnt/source --archive-mount=/mnt/archive \
  *     --archive-storage=<storage_id> --live <asset_id> [...]
  */
 

@@ -12,18 +12,22 @@ initializeProfile(profileName);
 
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const assetId = args[0];
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const storageName = storageArg?.split('=')[1];
 
-if (!assetId) {
-  console.error('Usage: npx tsx scripts/undelete-and-create-file.ts <asset_id> --profile=name');
+if (!assetId || !storageName) {
+  console.error('Usage: npx tsx scripts/undelete-and-create-file.ts <asset_id> --storage=NAME --profile=<name>');
   process.exit(1);
 }
 
 async function main() {
   const storages = await iconikRequest<{ objects: Array<{ id: string; name: string }> }>('files/v1/storages/');
-  const mortarStorage = storages.objects.find(s => s.name === 'Mortar');
+  const targetStorage = storages.objects.find(s => s.name === storageName);
 
-  if (!mortarStorage) {
-    console.error('Mortar storage not found');
+  if (!targetStorage) {
+    console.error(`Storage "${storageName}" not found`);
+    console.error('Available storages:');
+    storages.objects.forEach(s => console.error(`  - ${s.name}`));
     process.exit(1);
   }
 
@@ -36,22 +40,22 @@ async function main() {
     `files/v1/assets/${assetId}/file_sets/`
   );
 
-  const mortarFs = fileSets.objects?.find(fs => fs.storage_id === mortarStorage.id);
+  const targetFs = fileSets.objects?.find(fs => fs.storage_id === targetStorage.id);
 
-  if (!mortarFs) {
-    console.log('No Mortar file set found');
+  if (!targetFs) {
+    console.log(`No ${storageName} file set found`);
     return;
   }
 
-  console.log('\nMortar file set:', mortarFs.id);
-  console.log('  Status:', mortarFs.status);
-  console.log('  Name:', mortarFs.name);
-  console.log('  Path:', mortarFs.base_dir);
+  console.log(`\n${storageName} file set:`, targetFs.id);
+  console.log('  Status:', targetFs.status);
+  console.log('  Name:', targetFs.name);
+  console.log('  Path:', targetFs.base_dir);
 
   // Undelete the file set if needed
-  if (mortarFs.status === 'DELETED') {
+  if (targetFs.status === 'DELETED') {
     console.log('\nUndeleting file set...');
-    await iconikRequest(`files/v1/assets/${assetId}/file_sets/${mortarFs.id}/`, {
+    await iconikRequest(`files/v1/assets/${assetId}/file_sets/${targetFs.id}/`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'ACTIVE' })
     });
@@ -62,7 +66,7 @@ async function main() {
   const files = await iconikRequest<{ objects: Array<{ id: string; file_set_id: string }> }>(
     `files/v1/assets/${assetId}/files/`
   );
-  const hasFile = files.objects?.some(f => f.file_set_id === mortarFs.id);
+  const hasFile = files.objects?.some(f => f.file_set_id === targetFs.id);
 
   if (hasFile) {
     console.log('\nFile record already exists');
@@ -74,12 +78,12 @@ async function main() {
   const newFile = await iconikRequest<{ id: string }>(`files/v1/assets/${assetId}/files/`, {
     method: 'POST',
     body: JSON.stringify({
-      file_set_id: mortarFs.id,
-      format_id: mortarFs.format_id,
-      storage_id: mortarFs.storage_id,
-      name: mortarFs.name,
-      original_name: mortarFs.name,
-      directory_path: mortarFs.base_dir,
+      file_set_id: targetFs.id,
+      format_id: targetFs.format_id,
+      storage_id: targetFs.storage_id,
+      name: targetFs.name,
+      original_name: targetFs.name,
+      directory_path: targetFs.base_dir,
       status: 'CLOSED',
       type: 'FILE',
       size: 0

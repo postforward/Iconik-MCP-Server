@@ -18,8 +18,8 @@ if (assetIds.length === 0) {
 Usage: npx tsx scripts/retrigger-archive.ts <asset_id> [asset_id...] [--profile=name]
 
 Examples:
-  npx tsx scripts/retrigger-archive.ts abc-123 --profile=tm
-  npx tsx scripts/retrigger-archive.ts abc-123 def-456 ghi-789 --profile=tm
+  npx tsx scripts/retrigger-archive.ts abc-123 --profile=<name>
+  npx tsx scripts/retrigger-archive.ts abc-123 def-456 ghi-789 --profile=<name>
 `);
   process.exit(1);
 }

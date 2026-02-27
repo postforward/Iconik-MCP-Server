@@ -15,9 +15,9 @@
  * Dry-run by default. Add --live to apply changes.
  *
  * Usage:
- *   npx tsx scripts/fix-collection-archive-status.ts --profile=tm --mount=/Volumes/mortar <collection_id> [...]
- *   npx tsx scripts/fix-collection-archive-status.ts --profile=tm --mount=/Volumes/mortar --live <collection_id> [...]
- *   npx tsx scripts/fix-collection-archive-status.ts --profile=tm --mount=/Volumes/mortar --storage=MyArchive <collection_id> [...]
+ *   npx tsx scripts/fix-collection-archive-status.ts --profile=<name> --mount=/mnt/archive <collection_id> [...]
+ *   npx tsx scripts/fix-collection-archive-status.ts --profile=<name> --mount=/mnt/archive --live <collection_id> [...]
+ *   npx tsx scripts/fix-collection-archive-status.ts --profile=<name> --mount=/mnt/archive --storage=MyArchive <collection_id> [...]
  */
 
 import { iconikRequest, initializeProfile } from "../src/client.js";

@@ -17,9 +17,9 @@
  * Dry-run by default. Add --live to apply changes.
  *
  * Usage:
- *   npx tsx scripts/verify-collection-archive-health.ts --profile=tm --mount=/Volumes/mortar <collection_id> [...]
- *   npx tsx scripts/verify-collection-archive-health.ts --profile=tm --mount=/Volumes/mortar --fix --live <collection_id> [...]
- *   npx tsx scripts/verify-collection-archive-health.ts --profile=tm --mount=/Volumes/mortar --storage=MyArchive <collection_id> [...]
+ *   npx tsx scripts/verify-collection-archive-health.ts --profile=<name> --mount=/mnt/archive <collection_id> [...]
+ *   npx tsx scripts/verify-collection-archive-health.ts --profile=<name> --mount=/mnt/archive --fix --live <collection_id> [...]
+ *   npx tsx scripts/verify-collection-archive-health.ts --profile=<name> --mount=/mnt/archive --storage=MyArchive <collection_id> [...]
  */
 
 import { iconikRequest, initializeProfile } from "../src/client.js";

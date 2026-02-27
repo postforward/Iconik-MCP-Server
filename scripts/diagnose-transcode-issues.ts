@@ -3,7 +3,7 @@
  * Diagnose transcode/proxy failures for assets in a collection.
  * Pulls technical metadata, proxy info, format details, and recent job history.
  *
- * Usage: npx tsx scripts/diagnose-transcode-issues.ts --profile=privcap --collection=<id>
+ * Usage: npx tsx scripts/diagnose-transcode-issues.ts --profile=<name> --collection=<id>
  */
 
 import { initializeProfile, iconikRequest } from "../src/client.js";
@@ -16,10 +16,10 @@ function getArg(name: string): string | undefined {
   return arg?.split("=")[1];
 }
 
-const profile = getArg("profile") || "privcap";
+const profile = getArg("profile");
 const collectionId = getArg("collection");
-if (!collectionId) {
-  console.error("Usage: --collection=<uuid> [--profile=<name>]");
+if (!collectionId || !profile) {
+  console.error("Usage: --collection=<uuid> --profile=<name>");
   process.exit(1);
 }
 

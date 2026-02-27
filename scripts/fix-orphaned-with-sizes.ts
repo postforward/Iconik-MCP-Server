@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 
 /**
- * Fix orphaned Mortar file sets by:
+ * Fix orphaned file sets by:
  * 1. Undeleting the file set if needed
  * 2. Creating a file record
  * 3. Reading actual file size from mounted volume and updating
@@ -17,12 +17,14 @@ initializeProfile(profileName);
 
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const collectionId = args[0];
-const mountPath = args[1] || '/Volumes/mortar';
+const mountPath = args[1] || '/mnt/storage';
 const isLive = process.argv.includes('--live');
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const storageName = storageArg?.split('=')[1];
 
-if (!collectionId) {
-  console.error('Usage: npx tsx scripts/fix-orphaned-with-sizes.ts <collection_id> [mount_path] --profile=name [--live]');
-  console.error('  mount_path defaults to /Volumes/mortar');
+if (!collectionId || !storageName) {
+  console.error('Usage: npx tsx scripts/fix-orphaned-with-sizes.ts <collection_id> [mount_path] --storage=NAME --profile=<name> [--live]');
+  console.error('  mount_path defaults to /mnt/storage');
   process.exit(1);
 }
 
@@ -66,21 +68,24 @@ async function main() {
   // Check mount
   if (!fs.existsSync(mountPath)) {
     console.error(`Mount path not found: ${mountPath}`);
-    console.error('Make sure the Mortar volume is mounted.');
+    console.error('Make sure the storage volume is mounted.');
     process.exit(1);
   }
 
   const collection = await iconikRequest<{ title: string }>(`assets/v1/collections/${collectionId}/`);
   console.log('Collection:', collection.title);
+  console.log('Storage:', storageName);
   console.log('Mount path:', mountPath);
   console.log('Mode:', isLive ? '🔴 LIVE' : '🟡 DRY RUN');
   console.log('');
 
   const storages = await iconikRequest<{ objects: Storage[] }>('files/v1/storages/');
-  const mortarStorage = storages.objects.find(s => s.name === 'Mortar');
+  const targetStorage = storages.objects.find(s => s.name === storageName);
 
-  if (!mortarStorage) {
-    console.error('Mortar storage not found');
+  if (!targetStorage) {
+    console.error(`Storage "${storageName}" not found`);
+    console.error('Available storages:');
+    storages.objects.forEach(s => console.error(`  - ${s.name}`));
     process.exit(1);
   }
 
@@ -104,9 +109,9 @@ async function main() {
       `files/v1/assets/${item.id}/files/`
     );
 
-    const mortarFileSets = fileSets.objects?.filter(fs => fs.storage_id === mortarStorage.id) || [];
+    const targetFileSets = fileSets.objects?.filter(fs => fs.storage_id === targetStorage.id) || [];
 
-    for (const fs of mortarFileSets) {
+    for (const fs of targetFileSets) {
       const existingFile = files.objects?.find(f => f.file_set_id === fs.id);
       const fileSize = getFileSize(fs.base_dir, fs.name);
 

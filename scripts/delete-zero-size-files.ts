@@ -15,9 +15,11 @@ initializeProfile(profileName);
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const collectionId = args[0];
 const isLive = process.argv.includes('--live');
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const storageName = storageArg?.split('=')[1];
 
-if (!collectionId) {
-  console.error('Usage: npx tsx scripts/delete-zero-size-files.ts <collection_id> --profile=name [--live]');
+if (!collectionId || !storageName) {
+  console.error('Usage: npx tsx scripts/delete-zero-size-files.ts <collection_id> --storage=NAME --profile=<name> [--live]');
   process.exit(1);
 }
 
@@ -48,10 +50,12 @@ async function main() {
   console.log('');
 
   const storages = await iconikRequest<{ objects: Storage[] }>('files/v1/storages/');
-  const mortarStorage = storages.objects.find(s => s.name === 'Mortar');
+  const targetStorage = storages.objects.find(s => s.name === storageName);
 
-  if (!mortarStorage) {
-    console.error('Mortar storage not found');
+  if (!targetStorage) {
+    console.error(`Storage "${storageName}" not found`);
+    console.error('Available storages:');
+    storages.objects.forEach(s => console.error(`  - ${s.name}`));
     process.exit(1);
   }
 
@@ -69,8 +73,8 @@ async function main() {
     const files = await iconikRequest<{ objects: FileRecord[] }>(`files/v1/assets/${item.id}/files/`);
 
     for (const f of files.objects || []) {
-      // Only delete Mortar files with size 0
-      if (f.storage_id === mortarStorage.id && f.size === 0) {
+      // Only delete files on target storage with size 0
+      if (f.storage_id === targetStorage.id && f.size === 0) {
         zeroSizeCount++;
         console.log(`Zero-size file: ${item.title}`);
         console.log(`  File ID: ${f.id}`);
@@ -99,7 +103,7 @@ async function main() {
   console.log('\n' + '═'.repeat(50));
   console.log('SUMMARY');
   console.log('═'.repeat(50));
-  console.log(`Zero-size Mortar file records found: ${zeroSizeCount}`);
+  console.log(`Zero-size ${storageName} file records found: ${zeroSizeCount}`);
 
   if (isLive) {
     console.log(`Deleted: ${deletedCount}`);

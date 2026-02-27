@@ -6,7 +6,12 @@ import { getProfileFromArgs } from "../src/config.ts";
 const profileName = getProfileFromArgs();
 initializeProfile(profileName);
 
-const collectionId = process.argv.slice(2).filter(a => !a.startsWith('--'))[0] || '43c67a0c-0450-11f1-9646-ca893459883b';
+const collectionId = process.argv.slice(2).filter(a => !a.startsWith('--'))[0];
+
+if (!collectionId) {
+  console.error('Usage: npx tsx scripts/check-collection-sizes.ts <collection_id> --profile=<name>');
+  process.exit(1);
+}
 
 interface File {
   id: string;

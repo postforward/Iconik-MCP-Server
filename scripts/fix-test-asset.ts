@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 
 /**
- * Fix test asset by creating a file record with the actual file size
+ * Fix a single test asset by creating a file record with a specified file size
  */
 
 import { iconikRequest, initializeProfile } from "../src/client.ts";
@@ -10,16 +10,31 @@ import { getProfileFromArgs } from "../src/config.ts";
 const profileName = getProfileFromArgs();
 initializeProfile(profileName);
 
-const assetId = 'ef036206-a256-11f0-9fd9-4a7c5209f9ad';
+const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
+const assetId = args[0];
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const storageName = storageArg?.split('=')[1];
+const sizeArg = process.argv.find(a => a.startsWith('--size='));
+const fileSize = sizeArg ? parseInt(sizeArg.split('=')[1], 10) : 0;
+
+if (!assetId || !storageName) {
+  console.error('Usage: npx tsx scripts/fix-test-asset.ts <asset_id> --storage=NAME --profile=<name> [--size=BYTES]');
+  console.error('');
+  console.error('Options:');
+  console.error('  --storage=NAME   Storage to target (REQUIRED)');
+  console.error('  --size=BYTES     File size in bytes (default: 0)');
+  process.exit(1);
+}
 
 async function main() {
   // Get storages
   const storages = await iconikRequest<{ objects: Array<{ id: string; name: string }> }>('files/v1/storages/');
-  const mortarStorage = storages.objects.find(s => s.name === 'Mortar');
-  const trickStorage = storages.objects.find(s => s.name === 'Trick');
+  const targetStorage = storages.objects.find(s => s.name === storageName);
 
-  if (!mortarStorage || !trickStorage) {
-    console.error('Storage not found');
+  if (!targetStorage) {
+    console.error(`Storage "${storageName}" not found`);
+    console.error('Available storages:');
+    storages.objects.forEach(s => console.error(`  - ${s.name}`));
     process.exit(1);
   }
 
@@ -28,10 +43,10 @@ async function main() {
     `files/v1/assets/${assetId}/file_sets/`
   );
 
-  // First, undelete Trick file set if needed
+  // Undelete file sets on target storage if needed
   for (const fs of fileSets.objects || []) {
-    if (fs.storage_id === trickStorage.id && fs.status === 'DELETED') {
-      console.log('Undeleting Trick file set:', fs.id);
+    if (fs.storage_id === targetStorage.id && fs.status === 'DELETED') {
+      console.log(`Undeleting ${storageName} file set:`, fs.id);
       await iconikRequest(`files/v1/assets/${assetId}/file_sets/${fs.id}/`, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'ACTIVE' })
@@ -39,33 +54,34 @@ async function main() {
     }
   }
 
-  // Find the Mortar file set
-  const mortarFileSet = fileSets.objects?.find(fs => fs.storage_id === mortarStorage.id);
+  // Find the target file set
+  const targetFileSet = fileSets.objects?.find(fs => fs.storage_id === targetStorage.id);
 
-  if (!mortarFileSet) {
-    console.log('No Mortar file set found');
+  if (!targetFileSet) {
+    console.log(`No ${storageName} file set found`);
     return;
   }
 
-  console.log('\nMortar file set:', mortarFileSet.id);
-  console.log('  Name:', mortarFileSet.name);
-  console.log('  Base Dir:', mortarFileSet.base_dir);
-  console.log('  Format ID:', mortarFileSet.format_id);
+  console.log(`\n${storageName} file set:`, targetFileSet.id);
+  console.log('  Name:', targetFileSet.name);
+  console.log('  Base Dir:', targetFileSet.base_dir);
+  console.log('  Format ID:', targetFileSet.format_id);
 
   // Check if file record already exists
   const existingFiles = await iconikRequest<{ objects: Array<{ id: string; file_set_id: string }> }>(
     `files/v1/assets/${assetId}/files/`
   );
 
-  const hasFileRecord = existingFiles.objects?.some(f => f.file_set_id === mortarFileSet.id);
+  const hasFileRecord = existingFiles.objects?.some(f => f.file_set_id === targetFileSet.id);
 
   if (hasFileRecord) {
     console.log('\nFile record already exists for this file set');
     return;
   }
 
-  // Create a file record for it with the actual size (40.96 GB)
-  console.log('\nCreating file record with actual size (40.96 GB)...');
+  // Create a file record
+  const sizeLabel = fileSize > 0 ? `${(fileSize / 1024 / 1024 / 1024).toFixed(2)} GB` : '0';
+  console.log(`\nCreating file record with size ${sizeLabel}...`);
 
   try {
     const fileRecord = await iconikRequest<{ id: string; size: number; status: string }>(
@@ -73,15 +89,15 @@ async function main() {
       {
         method: 'POST',
         body: JSON.stringify({
-          file_set_id: mortarFileSet.id,
-          format_id: mortarFileSet.format_id,
-          storage_id: mortarFileSet.storage_id,
-          name: mortarFileSet.name,
-          original_name: mortarFileSet.name,
-          directory_path: mortarFileSet.base_dir,
+          file_set_id: targetFileSet.id,
+          format_id: targetFileSet.format_id,
+          storage_id: targetFileSet.storage_id,
+          name: targetFileSet.name,
+          original_name: targetFileSet.name,
+          directory_path: targetFileSet.base_dir,
           status: 'CLOSED',
           type: 'FILE',
-          size: 43980465766  // 40.96 GB in bytes
+          size: fileSize
         })
       }
     );

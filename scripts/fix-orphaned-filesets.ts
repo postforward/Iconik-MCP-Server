@@ -34,7 +34,7 @@ if (!collectionId || !storageName) {
   console.error('  --live           Actually create files (default is dry run)');
   console.error('');
   console.error('Example:');
-  console.error('  npx tsx scripts/fix-orphaned-filesets.ts abc123 --storage=Mortar --profile=tm --live');
+  console.error('  npx tsx scripts/fix-orphaned-filesets.ts abc123 --storage=MyStorage --profile=myprofile --live');
   process.exit(1);
 }
 

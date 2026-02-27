@@ -18,8 +18,8 @@ if (assetIds.length === 0) {
 Usage: npx tsx scripts/check-archiving-status.ts <asset_id> [asset_id...] [--profile=name] [--fix]
 
 Examples:
-  npx tsx scripts/check-archiving-status.ts abc-123 --profile=tm
-  npx tsx scripts/check-archiving-status.ts abc-123 def-456 --profile=tm --fix
+  npx tsx scripts/check-archiving-status.ts abc-123 --profile=<name>
+  npx tsx scripts/check-archiving-status.ts abc-123 def-456 --profile=<name> --fix
 `);
   process.exit(1);
 }

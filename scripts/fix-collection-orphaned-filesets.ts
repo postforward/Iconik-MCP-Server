@@ -2,7 +2,7 @@
 
 /**
  * Fix orphaned file sets in a specific collection
- * Creates file records for Mortar file sets that have no files
+ * Creates file records for file sets on a target storage that have no files
  */
 
 import { iconikRequest, initializeProfile } from "../src/client.ts";
@@ -14,9 +14,11 @@ initializeProfile(profileName);
 const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const collectionId = args[0];
 const isLive = process.argv.includes('--live');
+const storageArg = process.argv.find(a => a.startsWith('--storage='));
+const storageName = storageArg?.split('=')[1];
 
-if (!collectionId) {
-  console.error('Usage: npx tsx scripts/fix-collection-orphaned-filesets.ts <collection_id> --profile=name [--live]');
+if (!collectionId || !storageName) {
+  console.error('Usage: npx tsx scripts/fix-collection-orphaned-filesets.ts <collection_id> --storage=NAME --profile=<name> [--live]');
   process.exit(1);
 }
 
@@ -52,15 +54,18 @@ async function main() {
   // Get collection info
   const collection = await iconikRequest<{ title: string }>(`assets/v1/collections/${collectionId}/`);
   console.log('Collection:', collection.title);
+  console.log('Storage:', storageName);
   console.log('Mode:', isLive ? '🔴 LIVE' : '🟡 DRY RUN');
   console.log('');
 
   // Get storages
   const storages = await iconikRequest<PaginatedResponse<Storage>>('files/v1/storages/');
-  const mortarStorage = storages.objects.find(s => s.name === 'Mortar');
+  const targetStorage = storages.objects.find(s => s.name === storageName);
 
-  if (!mortarStorage) {
-    console.error('Mortar storage not found');
+  if (!targetStorage) {
+    console.error(`Storage "${storageName}" not found`);
+    console.error('Available storages:');
+    storages.objects.forEach(s => console.error(`  - ${s.name}`));
     process.exit(1);
   }
 
@@ -85,9 +90,9 @@ async function main() {
       `files/v1/assets/${item.id}/files/`
     );
 
-    const mortarFileSets = fileSets.objects?.filter(fs => fs.storage_id === mortarStorage.id) || [];
+    const targetFileSets = fileSets.objects?.filter(fs => fs.storage_id === targetStorage.id) || [];
 
-    for (const fs of mortarFileSets) {
+    for (const fs of targetFileSets) {
       const hasFiles = files.objects?.some(f => f.file_set_id === fs.id);
 
       if (!hasFiles) {
