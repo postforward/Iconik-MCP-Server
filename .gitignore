@@ -9,6 +9,9 @@ dist/
 .env.local
 .env.*.local
 
+# MCP server config (contains auth tokens)
+.mcp.json
+
 # Config files with credentials
 iconik-config.json
 .iconik-config.json

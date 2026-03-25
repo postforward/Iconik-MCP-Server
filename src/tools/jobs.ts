@@ -63,6 +63,28 @@ export function registerJobTools(server: McpServer) {
   );
 
   server.tool(
+    "update_job",
+    "Update a job's status and/or progress (useful for completing failed jobs)",
+    {
+      job_id: z.string().uuid().describe("The job UUID to update"),
+      status: jobStatusEnum.optional().describe("New job status"),
+      progress: z.number().min(0).max(100).optional().describe("Job progress percentage (0-100)"),
+    },
+    async ({ job_id, status, progress }) => {
+      const body: Record<string, unknown> = {};
+      if (status) body.status = status;
+      if (progress !== undefined) body.progress_processed = progress;
+      const result = await iconikRequest(`jobs/v1/jobs/${job_id}/`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
     "abort_job",
     "Abort/cancel a running job",
     {
