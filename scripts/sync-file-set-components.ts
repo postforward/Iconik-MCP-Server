@@ -3,19 +3,26 @@
 /**
  * sync-file-set-components.ts
  *
- * Proactive maintenance script that scans a storage for file sets whose
+ * Proactive maintenance script that finds and fixes file sets whose
  * component_ids are out of sync with their format's current components.
  * This mismatch is the #1 cause of "Files components differ between source
  * and destination" errors during Iconik archive jobs.
  *
- * Scans CLOSED files on the target storage, groups by asset, then compares
- * each file set's component_ids against the format's actual components.
- * Mismatches are fixed by PATCHing the file set with current component_ids.
+ * By default, only checks assets modified in the last 48 hours (fast mode).
+ * Use --full to scan all files on the storage (slow but thorough).
  *
  * Usage:
+ *   # Fast: only recently modified assets (~1-2 min)
  *   npx tsx scripts/sync-file-set-components.ts --profile=<name> --storage=<name>
- *   npx tsx scripts/sync-file-set-components.ts --profile=<name> --storage=<name> --live
+ *
+ *   # Full: scan entire storage (~30+ min)
+ *   npx tsx scripts/sync-file-set-components.ts --profile=<name> --storage=<name> --full
+ *
+ *   # Nightly automation
  *   npx tsx scripts/sync-file-set-components.ts --profile=<name> --storage=<name> --live --json
+ *
+ *   # Custom lookback window (hours)
+ *   npx tsx scripts/sync-file-set-components.ts --profile=<name> --storage=<name> --hours=72
  */
 
 import { iconikRequest, initializeProfile, getCurrentProfileInfo } from "../src/client.js";
@@ -27,6 +34,7 @@ initializeProfile(profileName);
 const rawArgs = process.argv.slice(2);
 const isLive = rawArgs.includes("--live");
 const jsonOutput = rawArgs.includes("--json");
+const fullScan = rawArgs.includes("--full");
 const CONCURRENCY = 10;
 
 function getArgValue(prefix: string): string | undefined {
@@ -35,14 +43,17 @@ function getArgValue(prefix: string): string | undefined {
 }
 
 const storageName = getArgValue("--storage=");
+const lookbackHours = parseInt(getArgValue("--hours=") || "48", 10);
 
 if (!storageName) {
   console.error("Usage: npx tsx scripts/sync-file-set-components.ts --profile=<name> --storage=<name> [options]");
   console.error("");
   console.error("Options:");
-  console.error("  --storage=NAME   Storage to scan (REQUIRED)");
+  console.error("  --storage=NAME   Storage to check file sets against (REQUIRED)");
   console.error("  --live           Apply fixes (default: dry-run)");
   console.error("  --json           Output results as JSON");
+  console.error("  --full           Scan all files on storage (slow, use for first run)");
+  console.error("  --hours=N        Lookback window in hours (default: 48)");
   process.exit(1);
 }
 
@@ -54,14 +65,18 @@ interface PaginatedResponse<T> {
   pages?: number;
 }
 
+interface SearchResponse {
+  objects: Array<{ id: string; title?: string }>;
+  total?: number;
+  pages?: number;
+}
+
 interface FileRecord {
   id: string;
   name: string;
   asset_id: string;
   storage_id: string;
   status: string;
-  file_set_id?: string;
-  format_id?: string;
 }
 
 interface FileSet {
@@ -70,7 +85,6 @@ interface FileSet {
   storage_id: string;
   format_id: string;
   component_ids: string[];
-  asset_id?: string;
 }
 
 interface Component {
@@ -119,7 +133,6 @@ async function processAsset(
   const results: FixResult[] = [];
 
   try {
-    // Get file sets for this asset on the target storage
     const fileSets = await getAllPages<FileSet>(
       `files/v1/assets/${assetId}/file_sets/?storage_id=${storageId}`
     );
@@ -129,7 +142,6 @@ async function processAsset(
     for (const fileSet of fileSets) {
       if (!fileSet.format_id) continue;
 
-      // Get current format components
       let currentComponents: Component[];
       try {
         const compsResp = await iconikRequest<PaginatedResponse<Component>>(
@@ -137,21 +149,18 @@ async function processAsset(
         );
         currentComponents = compsResp.objects || [];
       } catch {
-        // Format might not exist anymore
         continue;
       }
 
       const currentIds = currentComponents.map((c) => c.id).sort();
       const fileSetIds = (fileSet.component_ids || []).sort();
 
-      // Compare
       const match =
         currentIds.length === fileSetIds.length &&
         currentIds.every((id, i) => id === fileSetIds[i]);
 
       if (match) continue;
 
-      // Mismatch found
       const result: FixResult = {
         assetId,
         fileSetId: fileSet.id,
@@ -178,11 +187,96 @@ async function processAsset(
 
       results.push(result);
     }
-  } catch (err) {
+  } catch {
     // Asset might have been deleted
   }
 
   return results;
+}
+
+// --- Asset discovery strategies ---
+
+async function discoverRecentAssets(storageId: string, hours: number): Promise<string[]> {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+  if (!jsonOutput) {
+    console.log(`Searching for assets modified since ${since} (${hours}h window)...`);
+  }
+
+  const assetIds: string[] = [];
+  let page = 1;
+
+  while (true) {
+    const resp = await iconikRequest<SearchResponse>(
+      `search/v1/search/?per_page=100&page=${page}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          filter: {
+            operator: "AND",
+            terms: [
+              { name: "date_modified", range: { min: since } },
+            ],
+          },
+          doc_types: ["assets"],
+          sort: [{ name: "date_modified", order: "desc" }],
+        }),
+      }
+    );
+
+    if (!resp.objects || resp.objects.length === 0) break;
+
+    for (const obj of resp.objects) {
+      if (obj.id) assetIds.push(obj.id);
+    }
+
+    if (page === 1 && !jsonOutput) {
+      console.log(`Found ${resp.total || 0} recently modified assets`);
+    }
+
+    if (page >= (resp.pages || 1)) break;
+    page++;
+  }
+
+  return assetIds;
+}
+
+async function discoverAllAssetsOnStorage(storageId: string): Promise<string[]> {
+  if (!jsonOutput) {
+    const firstPage = await iconikRequest<PaginatedResponse<FileRecord>>(
+      `files/v1/storages/${storageId}/files/?per_page=1&status=CLOSED`
+    );
+    console.log(`Full scan: ${(firstPage.total || 0).toLocaleString()} CLOSED files on storage`);
+  }
+
+  const assetIds = new Set<string>();
+  let page = 1;
+  const maxPages = 10000;
+
+  while (page <= maxPages) {
+    let files: PaginatedResponse<FileRecord>;
+    try {
+      files = await iconikRequest<PaginatedResponse<FileRecord>>(
+        `files/v1/storages/${storageId}/files/?per_page=100&page=${page}&status=CLOSED`
+      );
+    } catch {
+      break;
+    }
+
+    if (!files.objects || files.objects.length === 0) break;
+
+    for (const file of files.objects) {
+      if (file.asset_id) assetIds.add(file.asset_id);
+    }
+
+    if (!jsonOutput && page % 50 === 0) {
+      console.log(`  Scanned ${page * 100} files, ${assetIds.size} unique assets...`);
+    }
+
+    page++;
+  }
+
+  return Array.from(assetIds);
 }
 
 // --- Main ---
@@ -190,6 +284,7 @@ async function processAsset(
 async function main() {
   const profile = getCurrentProfileInfo();
   const startTime = Date.now();
+  const mode = fullScan ? "FULL SCAN" : `RECENT (${lookbackHours}h)`;
 
   if (!jsonOutput) {
     console.log(`\n${"=".repeat(60)}`);
@@ -197,7 +292,7 @@ async function main() {
     console.log(`${"=".repeat(60)}`);
     console.log(`Profile: ${profile.name}`);
     console.log(`Storage: ${storageName}`);
-    console.log(`Mode: ${isLive ? "LIVE" : "DRY RUN"}`);
+    console.log(`Mode: ${isLive ? "LIVE" : "DRY RUN"} | Scope: ${mode}`);
     console.log(`Concurrency: ${CONCURRENCY}`);
     console.log("");
   }
@@ -218,68 +313,36 @@ async function main() {
     process.exit(1);
   }
 
-  // Get total CLOSED files to estimate scope
-  const firstPage = await iconikRequest<PaginatedResponse<FileRecord>>(
-    `files/v1/storages/${storage.id}/files/?per_page=1&status=CLOSED`
-  );
-  const totalFiles = firstPage.total || 0;
+  // Discover assets to check
+  const assetIds = fullScan
+    ? await discoverAllAssetsOnStorage(storage.id)
+    : await discoverRecentAssets(storage.id, lookbackHours);
 
   if (!jsonOutput) {
-    console.log(`Total CLOSED files on ${storageName}: ${totalFiles.toLocaleString()}`);
-    console.log("Scanning for component mismatches...\n");
+    console.log(`\nChecking ${assetIds.length.toLocaleString()} assets for component mismatches...\n`);
   }
 
-  // Scan files, deduplicate by asset
-  const processedAssets = new Set<string>();
+  // Process assets in parallel batches
   const allResults: FixResult[] = [];
-  let totalScanned = 0;
-  let page = 1;
-  const maxPages = Math.ceil(totalFiles / 100) + 5;
+  let assetsChecked = 0;
 
-  while (page <= maxPages) {
-    let files: PaginatedResponse<FileRecord>;
-    try {
-      files = await iconikRequest<PaginatedResponse<FileRecord>>(
-        `files/v1/storages/${storage.id}/files/?per_page=100&page=${page}&status=CLOSED`
-      );
-    } catch {
-      break;
+  for (let i = 0; i < assetIds.length; i += CONCURRENCY) {
+    const batch = assetIds.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map((id) => processAsset(id, storage.id, isLive))
+    );
+    for (const results of batchResults) {
+      allResults.push(...results);
     }
+    assetsChecked += batch.length;
 
-    if (!files.objects || files.objects.length === 0) break;
-
-    totalScanned += files.objects.length;
-
-    // Collect unique asset IDs from this page
-    const newAssetIds: string[] = [];
-    for (const file of files.objects) {
-      if (file.asset_id && !processedAssets.has(file.asset_id)) {
-        processedAssets.add(file.asset_id);
-        newAssetIds.push(file.asset_id);
-      }
-    }
-
-    // Process assets in parallel batches
-    for (let i = 0; i < newAssetIds.length; i += CONCURRENCY) {
-      const batch = newAssetIds.slice(i, i + CONCURRENCY);
-      const batchResults = await Promise.all(
-        batch.map((id) => processAsset(id, storage.id, isLive))
-      );
-      for (const results of batchResults) {
-        allResults.push(...results);
-      }
-    }
-
-    // Progress update
-    if (!jsonOutput && page % 20 === 0) {
+    if (!jsonOutput && assetsChecked % 200 === 0) {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       console.log(
-        `  [Page ${page}/${maxPages}] Scanned: ${totalScanned.toLocaleString()} files | ` +
-        `Assets checked: ${processedAssets.size} | Mismatches: ${allResults.length} | ${elapsed}s`
+        `  Checked ${assetsChecked}/${assetIds.length} assets | ` +
+        `Mismatches: ${allResults.length} | ${elapsed}s`
       );
     }
-
-    page++;
   }
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -290,14 +353,15 @@ async function main() {
     console.log(
       JSON.stringify({
         status: allResults.length === 0 ? "clean" : isLive ? "fixed" : "dry_run",
+        scope: fullScan ? "full" : "recent",
+        lookbackHours: fullScan ? null : lookbackHours,
         storage: storageName,
-        filesScanned: totalScanned,
-        assetsChecked: processedAssets.size,
+        assetsChecked,
         mismatchesFound: allResults.length,
         fixed,
         errors,
         durationSeconds: elapsed,
-        details: allResults.slice(0, 50), // Cap detail output
+        details: allResults.slice(0, 50),
       }, null, 2)
     );
   } else {
@@ -305,8 +369,8 @@ async function main() {
     console.log("SUMMARY");
     console.log(`${"=".repeat(60)}`);
     console.log(`Duration: ${Math.floor(elapsed / 60)}m ${elapsed % 60}s`);
-    console.log(`Files scanned: ${totalScanned.toLocaleString()}`);
-    console.log(`Assets checked: ${processedAssets.size.toLocaleString()}`);
+    console.log(`Scope: ${mode}`);
+    console.log(`Assets checked: ${assetsChecked.toLocaleString()}`);
     console.log(`Component mismatches found: ${allResults.length}`);
 
     if (allResults.length > 0) {
