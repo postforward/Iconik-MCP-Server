@@ -569,64 +569,100 @@ async function main() {
     return;
   }
 
-  // Get pending work
-  const pending = Object.values(state.assets).filter(a =>
+  // Check if there's anything to do at all
+  const totalPending = Object.values(state.assets).filter(a =>
     a.status !== "ARCHIVED" && a.status !== "FAILED"
-  );
+  ).length;
 
-  if (pending.length === 0) {
+  if (totalPending === 0) {
     console.log("No pending work — all assets are archived or failed.");
     await notify(`Cold archive batch: nothing to do. ${statsLine(state)}`);
     return;
   }
 
-  console.log(`Pending: ${pending.length} assets, processing in batches of ${concurrency}`);
-  console.log("");
+  console.log(`Pending: ${totalPending} assets across ${config.tagged_collections.length} collections`);
+  console.log(`Processing one collection at a time, batches of ${concurrency}\n`);
 
   await notify(
     `🚀 Cold archive batch ${dryRun ? "(DRY RUN)" : "STARTED"}\n` +
     `Profile: ${profile.name} | Concurrency: ${concurrency}\n` +
-    `${statsLine(state)}`
+    `Pending: ${totalPending} | ${statsLine(state)}`
   );
 
-  let batchNumber = 0;
-  while (pending.length > 0 && !shouldStop) {
-    batchNumber++;
-    const batch = pending.splice(0, concurrency);
+  // Process one collection at a time, in config order
+  for (const col of config.tagged_collections) {
+    if (shouldStop) break;
 
-    const batchStart = Date.now();
-    console.log(`─── Batch ${batchNumber} (${batch.length} assets) ──────────────────────────────`);
-
-    await parallelMap(
-      batch,
-      async (asset) => {
-        process.stdout.write(`  [${asset.status.padEnd(15)}] ${asset.title.slice(0, 50)}\n`);
-        await processAsset(asset, state);
-        const icon = asset.status === "ARCHIVED" ? "✓"
-          : asset.status === "FAILED" ? "✗"
-          : "·";
-        process.stdout.write(`  ${icon} ${asset.status.padEnd(15)} ${asset.title.slice(0, 50)}\n`);
-      },
-      concurrency,
+    const colPending = Object.values(state.assets).filter(a =>
+      a.collection_title === col.title &&
+      a.status !== "ARCHIVED" &&
+      a.status !== "FAILED"
     );
 
-    saveState(state);
-    const elapsed = ((Date.now() - batchStart) / 1000).toFixed(1);
-
-    console.log(`  Batch ${batchNumber} done in ${elapsed}s. ${statsLine(state)}\n`);
-
-    // Check for failures in this batch
-    const batchFailed = batch.filter(a => a.status === "FAILED");
-    if (batchFailed.length > 0) {
-      const failedList = batchFailed.map(a => `  • ${a.title}: ${a.error}`).join("\n");
-      await notify(
-        `⚠️ Batch ${batchNumber}: ${batchFailed.length} failed\n${failedList}\n${statsLine(state)}`
-      );
-    } else {
-      await notify(
-        `📦 Batch ${batchNumber} done in ${elapsed}s\n${statsLine(state)}`
-      );
+    if (colPending.length === 0) {
+      console.log(`══ ${col.title}: nothing to process (already done)\n`);
+      continue;
     }
+
+    console.log(`══ ${col.title}: ${colPending.length} pending ════════════════════════`);
+    const colStart = Date.now();
+    let colArchived = 0;
+    let colFailed = 0;
+    let batchNumber = 0;
+
+    while (colPending.length > 0 && !shouldStop) {
+      batchNumber++;
+      const batch = colPending.splice(0, concurrency);
+      const batchStart = Date.now();
+
+      await parallelMap(
+        batch,
+        async (asset) => {
+          await processAsset(asset, state);
+        },
+        concurrency,
+      );
+
+      saveState(state);
+      const batchElapsed = ((Date.now() - batchStart) / 1000).toFixed(1);
+
+      // Count outcomes from this batch
+      let batchArchived = 0;
+      const batchFailed: AssetState[] = [];
+      for (const a of batch) {
+        if (a.status === "ARCHIVED") {
+          batchArchived++;
+          colArchived++;
+        } else if (a.status === "FAILED") {
+          batchFailed.push(a);
+          colFailed++;
+        }
+      }
+
+      console.log(`  Batch ${batchNumber}: ${batchArchived}/${batch.length} archived in ${batchElapsed}s (${batchFailed.length} failed). ${statsLine(state)}`);
+
+      // Immediate notification on errors only
+      if (batchFailed.length > 0) {
+        const list = batchFailed.slice(0, 5).map(a => `  • ${a.title}: ${a.error}`).join("\n");
+        const more = batchFailed.length > 5 ? `\n  …and ${batchFailed.length - 5} more` : "";
+        await notify(
+          `⚠️ ${batchFailed.length} failed in ${col.title}:\n${list}${more}`
+        );
+      }
+    }
+
+    if (shouldStop) break;
+
+    // Collection complete notification
+    const colMin = ((Date.now() - colStart) / 1000 / 60).toFixed(1);
+    const totalDone = state.stats.archived + state.stats.failed;
+    const totalRemaining = state.stats.discovered - totalDone;
+    console.log(`\n✅ ${col.title}: archived ${colArchived}, failed ${colFailed} in ${colMin}min\n`);
+    await notify(
+      `✅ Collection complete: ${col.title}\n` +
+      `Archived: ${colArchived} | Failed: ${colFailed} | Elapsed: ${colMin}min\n` +
+      `Overall: ${state.stats.archived} archived, ${totalRemaining} remaining (${state.stats.failed} failed)`
+    );
   }
 
   // Final summary
