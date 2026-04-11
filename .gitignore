@@ -46,3 +46,10 @@ deploy/
 # Local workflow-specific scripts (not for public repo)
 scripts/check-archive-leftovers.ts
 scripts/cleanup-trick-after-archive.ts
+
+# Batch script state files (may contain client-specific UUIDs)
+*-state.json
+archive-state.json
+
+# Local config files for batch scripts (may contain client-specific UUIDs)
+configs/
