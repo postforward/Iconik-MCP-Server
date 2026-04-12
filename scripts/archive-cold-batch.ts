@@ -48,7 +48,7 @@ const rediscover = args.includes("--rediscover");
 const reset = args.includes("--reset");
 const retryFailed = args.includes("--retry-failed");
 const concurrency = parseInt(args.find(a => a.startsWith("--concurrency="))?.split("=")[1] || "10");
-const pollInterval = parseInt(args.find(a => a.startsWith("--poll-interval="))?.split("=")[1] || "15");
+const pollInterval = parseInt(args.find(a => a.startsWith("--poll-interval="))?.split("=")[1] || "5");
 const configArg = args.find(a => a.startsWith("--config="))?.split("=").slice(1).join("=");
 const stateArg = args.find(a => a.startsWith("--state="))?.split("=").slice(1).join("=") || "./archive-state.json";
 
@@ -369,15 +369,40 @@ async function deleteProxies(assetId: string): Promise<number> {
   return deleted;
 }
 
-async function archiveFormat(assetId: string, formatId: string, destStorageId: string): Promise<string> {
-  const result = await apiRequest<{ job_id: string }>(
-    `files/v1/assets/${assetId}/formats/${formatId}/archive/`,
-    {
-      method: "POST",
-      body: JSON.stringify({ storage_id: destStorageId }),
+/** Returns the job_id, or null if Iconik says "Archive skipped" (already archived) */
+async function archiveFormat(assetId: string, formatId: string, destStorageId: string): Promise<string | null> {
+  try {
+    const result = await apiRequest<{ job_id: string }>(
+      `files/v1/assets/${assetId}/formats/${formatId}/archive/`,
+      {
+        method: "POST",
+        body: JSON.stringify({ storage_id: destStorageId }),
+      }
+    );
+    return result.job_id;
+  } catch (e: any) {
+    const msg = e.message || String(e);
+    // Iconik returns 400 "Archive skipped" if the asset is already archived to that storage.
+    // Treat as success — there's nothing to do.
+    if (msg.includes("Archive skipped")) {
+      return null;
     }
-  );
-  return result.job_id;
+    throw e;
+  }
+}
+
+/** Check if the asset already has an archive file_set on the destination cold storage */
+async function isAlreadyArchived(assetId: string, destStorageId: string): Promise<boolean> {
+  try {
+    const fileSets = await apiRequest<PaginatedResponse<FileSet & { is_archive?: boolean }>>(
+      `files/v1/assets/${assetId}/file_sets/?per_page=20`
+    );
+    return (fileSets.objects || []).some(fs =>
+      fs.storage_id === destStorageId && fs.status === "ACTIVE"
+    );
+  } catch {
+    return false;
+  }
 }
 
 // ─── Google Chat notifications ─────────────────────────────────────────
@@ -432,6 +457,15 @@ async function processAsset(asset: AssetState, state: BatchState): Promise<void>
   const now = () => { asset.updated_at = new Date().toISOString(); };
 
   try {
+    // Pre-check: if already archived to cold storage, mark as done and skip everything.
+    // This catches assets that were archived in a previous run but not recorded in state.
+    if (await isAlreadyArchived(asset.id, config.cold_storage_id)) {
+      asset.status = "ARCHIVED";
+      asset.error = undefined;
+      now();
+      return;
+    }
+
     // Step 1: discover format/file (if not already known)
     if (!asset.format_id || !asset.file_id) {
       const ff = await getOriginalFormatAndFile(asset.id);
@@ -488,6 +522,12 @@ async function processAsset(asset: AssetState, state: BatchState): Promise<void>
         now();
       } else {
         const jobId = await archiveFormat(asset.id, asset.format_id, config.cold_storage_id);
+        if (jobId === null) {
+          // Iconik said "Archive skipped" — already archived. Treat as success.
+          asset.status = "ARCHIVED";
+          now();
+          return;
+        }
         asset.archive_job_id = jobId;
         now();
         const result = await waitForJob(jobId);
@@ -589,7 +629,13 @@ async function main() {
     `Pending: ${totalPending} | ${statsLine(state)}`
   );
 
-  // Process one collection at a time, in config order
+  // Process one collection at a time, in config order.
+  // Use a continuous worker pool (not fixed batches) so a slow asset doesn't
+  // block fast workers — each worker pulls the next pending asset as soon as
+  // it finishes its current one.
+  const SAVE_EVERY = 1; // save state after every completed asset (reliability > IO)
+  const PENDING_NOTIFY_INTERVAL_MS = 30 * 60 * 1000; // also: console heartbeat every 30 min
+
   for (const col of config.tagged_collections) {
     if (shouldStop) break;
 
@@ -604,63 +650,85 @@ async function main() {
       continue;
     }
 
-    console.log(`══ ${col.title}: ${colPending.length} pending ════════════════════════`);
+    console.log(`══ ${col.title}: ${colPending.length} pending, ${concurrency} workers ════════════════════════`);
     const colStart = Date.now();
     let colArchived = 0;
     let colFailed = 0;
-    let batchNumber = 0;
+    let completed = 0;
+    let queueIdx = 0;
+    const failedSinceLastNotify: AssetState[] = [];
+    let lastSaveAt = 0;
+    let lastHeartbeat = Date.now();
 
-    while (colPending.length > 0 && !shouldStop) {
-      batchNumber++;
-      const batch = colPending.splice(0, concurrency);
-      const batchStart = Date.now();
+    async function worker(workerId: number): Promise<void> {
+      while (!shouldStop) {
+        const myIdx = queueIdx++;
+        if (myIdx >= colPending.length) return;
+        const asset = colPending[myIdx];
 
-      await parallelMap(
-        batch,
-        async (asset) => {
-          await processAsset(asset, state);
-        },
-        concurrency,
-      );
+        const startedAt = Date.now();
+        await processAsset(asset, state);
+        const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
 
-      saveState(state);
-      const batchElapsed = ((Date.now() - batchStart) / 1000).toFixed(1);
-
-      // Count outcomes from this batch
-      let batchArchived = 0;
-      const batchFailed: AssetState[] = [];
-      for (const a of batch) {
-        if (a.status === "ARCHIVED") {
-          batchArchived++;
-          colArchived++;
-        } else if (a.status === "FAILED") {
-          batchFailed.push(a);
+        completed++;
+        if (asset.status === "ARCHIVED") colArchived++;
+        else if (asset.status === "FAILED") {
           colFailed++;
+          failedSinceLastNotify.push(asset);
+        }
+
+        const icon = asset.status === "ARCHIVED" ? "✓" : asset.status === "FAILED" ? "✗" : "?";
+        console.log(`  [w${workerId}] ${icon} ${elapsed}s ${asset.title.slice(0, 60)}  (${completed}/${colPending.length})`);
+
+        // Save state periodically (workers may collide briefly, but writes are atomic)
+        if (completed - lastSaveAt >= SAVE_EVERY) {
+          lastSaveAt = completed;
+          saveState(state);
+        }
+
+        // Heartbeat log every 30 min
+        if (Date.now() - lastHeartbeat > PENDING_NOTIFY_INTERVAL_MS) {
+          lastHeartbeat = Date.now();
+          const elapsedMin = ((Date.now() - colStart) / 1000 / 60).toFixed(0);
+          console.log(`  ── heartbeat: ${completed}/${colPending.length} done in ${elapsedMin}min, ${statsLine(state)}`);
+        }
+
+        // Flush errors to gchat in small bursts to avoid spam
+        if (failedSinceLastNotify.length >= 10) {
+          const list = failedSinceLastNotify.slice(0, 5).map(a => `  • ${a.title}: ${a.error}`).join("\n");
+          const more = failedSinceLastNotify.length > 5 ? `\n  …and ${failedSinceLastNotify.length - 5} more` : "";
+          await notify(`⚠️ ${failedSinceLastNotify.length} failed in ${col.title}:\n${list}${more}`);
+          failedSinceLastNotify.length = 0;
         }
       }
+    }
 
-      console.log(`  Batch ${batchNumber}: ${batchArchived}/${batch.length} archived in ${batchElapsed}s (${batchFailed.length} failed). ${statsLine(state)}`);
+    // Spawn workers
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, colPending.length) }, (_, i) => worker(i + 1))
+    );
 
-      // Immediate notification on errors only
-      if (batchFailed.length > 0) {
-        const list = batchFailed.slice(0, 5).map(a => `  • ${a.title}: ${a.error}`).join("\n");
-        const more = batchFailed.length > 5 ? `\n  …and ${batchFailed.length - 5} more` : "";
-        await notify(
-          `⚠️ ${batchFailed.length} failed in ${col.title}:\n${list}${more}`
-        );
-      }
+    // Final save for this collection
+    saveState(state);
+
+    // Flush remaining errors
+    if (failedSinceLastNotify.length > 0) {
+      const list = failedSinceLastNotify.slice(0, 5).map(a => `  • ${a.title}: ${a.error}`).join("\n");
+      const more = failedSinceLastNotify.length > 5 ? `\n  …and ${failedSinceLastNotify.length - 5} more` : "";
+      await notify(`⚠️ ${failedSinceLastNotify.length} failed in ${col.title}:\n${list}${more}`);
     }
 
     if (shouldStop) break;
 
     // Collection complete notification
     const colMin = ((Date.now() - colStart) / 1000 / 60).toFixed(1);
+    const ratePerHour = colArchived > 0 ? (colArchived / (parseFloat(colMin) / 60)).toFixed(0) : "0";
     const totalDone = state.stats.archived + state.stats.failed;
     const totalRemaining = state.stats.discovered - totalDone;
-    console.log(`\n✅ ${col.title}: archived ${colArchived}, failed ${colFailed} in ${colMin}min\n`);
+    console.log(`\n✅ ${col.title}: archived ${colArchived}, failed ${colFailed} in ${colMin}min (${ratePerHour}/hr)\n`);
     await notify(
       `✅ Collection complete: ${col.title}\n` +
-      `Archived: ${colArchived} | Failed: ${colFailed} | Elapsed: ${colMin}min\n` +
+      `Archived: ${colArchived} | Failed: ${colFailed} | Elapsed: ${colMin}min | Rate: ${ratePerHour}/hr\n` +
       `Overall: ${state.stats.archived} archived, ${totalRemaining} remaining (${state.stats.failed} failed)`
     );
   }
