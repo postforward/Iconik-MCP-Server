@@ -47,9 +47,23 @@ deploy/
 scripts/check-archive-leftovers.ts
 scripts/cleanup-trick-after-archive.ts
 
+# TM Trick→Mortar→archive-warm lifecycle scripts (client-specific, not for public repo)
+scripts/verify-trick-cloud-parity.ts
+scripts/reset-mortar-archive-status.ts
+scripts/repoint-trickcloud-to-archive-warm.ts
+scripts/expire-mortar.ts
+scripts/backfill-mortar-to-warm.ts
+
+# TM lifecycle output/state files (contain client UUIDs + asset data)
+parity-report.jsonl
+tm-repoint-state.jsonl
+tm-expire-state.jsonl
+tm-backfill-state.jsonl
+
 # Batch script state files (may contain client-specific UUIDs)
 *-state.json
 archive-state.json
 
 # Local config files for batch scripts (may contain client-specific UUIDs)
 configs/
+.backups-do-not-commit
