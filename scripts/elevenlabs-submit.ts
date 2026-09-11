@@ -86,6 +86,8 @@ async function one(assetId: string) {
   const sizeMb = ((proxy.size ?? 0) / 1e6).toFixed(1);
   log(`  proxy ${proxy.filename} ${proxy.format ?? ""} ${sizeMb} MB`);
   out.proxy = { id: proxy.id, filename: proxy.filename, size: proxy.size };
+  out.proxy_url = dl.url; // presigned (~12 h) — pasteable into ElevenLabs dashboard → Transcribe files → URL
+  out.keyterms = keyterms.join(", ");
 
   const webhookMetadata: Record<string, string> = { asset_id: assetId, version_id: versionId, profile: profileName ?? "" };
   if (userId) webhookMetadata.user_id = userId;

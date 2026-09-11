@@ -69,6 +69,16 @@ async function resolveVersion(assetId: string): Promise<string> {
 /** iconik wants ISO 639-1 ("en"); ElevenLabs returns 639-3 ("eng"). */
 const ISO3TO1: Record<string, string> = { eng: "en", spa: "es", fra: "fr", fre: "fr", deu: "de", ger: "de", por: "pt", ita: "it", nld: "nl", dut: "nl", jpn: "ja", kor: "ko", zho: "zh", chi: "zh", rus: "ru", ara: "ar", hin: "hi", swe: "sv", nor: "no", dan: "da", fin: "fi", pol: "pl", tur: "tr" };
 const normLang = (l?: string) => { if (!l) return undefined; const x = l.toLowerCase().split(/[-_]/)[0]; return x.length === 3 ? (ISO3TO1[x] ?? x.slice(0, 2)) : x; };
+async function freshProxyUrl(assetId: string): Promise<string | null> {
+  try {
+    const res = await iconikRequest<any>(`files/v1/assets/${assetId}/proxies/`);
+    const closed = (res.objects ?? []).filter((p: any) => p.status === "CLOSED");
+    if (!closed.length) return null;
+    const isAudio = (p: any) => /audio|mp3|aac|wav/i.test(`${p.format ?? ""} ${p.filename ?? ""}`);
+    closed.sort((a: any, b: any) => Number(isAudio(b)) - Number(isAudio(a)) || (a.size ?? 0) - (b.size ?? 0));
+    return (await iconikRequest<any>(`files/v1/assets/${assetId}/proxies/${closed[0].id}/download_url/`)).url ?? null;
+  } catch { return null; }
+}
 const chunk = <T,>(arr: T[], n: number) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
 
 // ---------------------------------------------------------------------------
@@ -267,7 +277,7 @@ async function main() {
     log(`Tracking: ${verified ? statusOnSuccess : "FAILED"}`);
   } catch (e) { if (!(e instanceof TrackingNotConfigured)) log(`  ⚠ tracking write failed: ${e instanceof Error ? e.message : e}`); else log("  (tracking view not configured — skipped)"); }
 
-  const summary = { asset_id: assetId, version_id: versionId, transcription_id: transcriptionId, source: sourceDesc, segments: bulkObjects.length, created_ok: ok, uncertain, verified, backup: b.file, speaker_labels: speakerLabels ?? null, editor_url: (main as any).sourceTranscriptionId ? editorUrl((main as any).sourceTranscriptionId) : null, asset_url: `https://app.iconik.io/asset/${assetId}` };
+  const summary = { asset_id: assetId, version_id: versionId, transcription_id: transcriptionId, source: sourceDesc, segments: bulkObjects.length, created_ok: ok, uncertain, verified, backup: b.file, speaker_labels: speakerLabels ?? null, editor_url: (main as any).sourceTranscriptionId ? editorUrl((main as any).sourceTranscriptionId) : null, asset_url: `https://app.iconik.io/asset/${assetId}`, proxy_url: await freshProxyUrl(assetId) };
   fs.mkdirSync("reports", { recursive: true });
   fs.writeFileSync(path.join("reports", `elevenlabs-import-${assetId}-${Date.now()}.json`), JSON.stringify(summary, null, 2));
   if (jsonOut) console.log(JSON.stringify(summary));
