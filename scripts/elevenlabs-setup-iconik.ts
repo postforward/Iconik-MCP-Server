@@ -34,7 +34,8 @@ interface FieldDef { name: string; label: string; field_type: string; fallback_t
 const FIELDS: FieldDef[] = [
   { name: SEND_FIELDS.keyterms, label: "Keyterms (names, places)", field_type: "text", description: "ElevenLabs keyterm prompting: proper nouns to spell correctly, separated by commas or new lines. Optional." },
   { name: SEND_FIELDS.language, label: "Language", field_type: "drop_down", description: "Spoken language hint for ElevenLabs. Auto-detect if blank.", options: [{ label: "Auto-detect", value: "auto" }, { label: "English", value: "en" }, { label: "Spanish", value: "es" }], multi: false },
-  { name: SEND_FIELDS.numSpeakers, label: "Number of speakers", field_type: "integer", fallback_type: "string", description: "Optional hint for diarization (1-32)." },
+  { name: SEND_FIELDS.numSpeakers, label: "Speakers (at least) — AssemblyAI only", field_type: "integer", fallback_type: "string", description: "AssemblyAI: minimum number of speakers (exact when 'Max speakers' equals it). Ignored by ElevenLabs." },
+  { name: SEND_FIELDS.maxSpeakers, label: "Max speakers (optional)", field_type: "integer", fallback_type: "string", description: "Upper bound on speakers. AssemblyAI: with 'Speakers' this makes a range. ElevenLabs: its only speaker setting (a maximum) — leave blank to let it decide." },
   { name: SEND_FIELDS.notes, label: "Notes", field_type: "string", description: "Free text, shown in the Slack notification." },
   { name: TRACKING_FIELDS.id, label: "ElevenLabs transcription ID", field_type: "string", description: "Set by the pipeline. Used to pull the edited transcript back.", read_only: true },
   { name: TRACKING_FIELDS.status, label: "ElevenLabs status", field_type: "drop_down", description: "Set by the pipeline.", options: ["SUBMITTED", "IMPORT_PENDING", "IMPORTED", "EDIT_IMPORTED", "FAILED"].map((v) => ({ label: v, value: v })), multi: false },

@@ -77,7 +77,10 @@ export interface SubmitOpts {
   modelId?: string; // default scribe_v2
   languageCode?: string | null; // undefined/null/"auto" → auto-detect
   diarize?: boolean; // default true
+  /** ElevenLabs treats this as the MAXIMUM number of speakers (docs); omit to let the model decide. */
   numSpeakers?: number;
+  /** Only when numSpeakers is unset: lower → more speakers predicted, higher → fewer (model default ≈0.22). */
+  diarizationThreshold?: number;
   keyterms?: string[];
   tagAudioEvents?: boolean; // default true
   webhook?: boolean; // default false → synchronous response with the transcript
@@ -107,6 +110,7 @@ export async function buildSttForm(o: SubmitOpts): Promise<FormData> {
   if (lang) fd.append("language_code", lang);
   fd.append("diarize", String(o.diarize ?? true));
   if (o.numSpeakers && o.numSpeakers > 0) fd.append("num_speakers", String(Math.min(32, Math.floor(o.numSpeakers))));
+  else if (o.diarizationThreshold != null && Number.isFinite(o.diarizationThreshold)) fd.append("diarization_threshold", String(Math.min(1, Math.max(0.01, o.diarizationThreshold))));
   fd.append("timestamps_granularity", "word");
   fd.append("tag_audio_events", String(o.tagAudioEvents ?? true));
   for (const k of o.keyterms ?? []) fd.append("keyterms", k);

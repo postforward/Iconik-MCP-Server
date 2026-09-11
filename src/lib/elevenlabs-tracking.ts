@@ -23,6 +23,7 @@ export const SEND_FIELDS = {
   keyterms: "ElevenLabsKeyterms",
   language: "ElevenLabsLanguage",
   numSpeakers: "ElevenLabsNumSpeakers",
+  maxSpeakers: "ElevenLabsMaxSpeakers",
   notes: "ElevenLabsNotes",
 } as const;
 

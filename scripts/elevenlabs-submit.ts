@@ -3,7 +3,7 @@
  * SUBMIT iconik ASSET(S) TO ELEVENLABS SCRIBE (async, webhook)
  *
  *   npx tsx scripts/elevenlabs-submit.ts --profile=<profile> --asset=<uuid>[,<uuid>...] \
- *       [--keyterms="Paradisus Palma Real, McKenzie"] [--language=auto|en|es] [--num-speakers=N] \
+ *       [--keyterms="Paradisus Palma Real, McKenzie"] [--language=auto|en|es] [--num-speakers=MAX] [--diarization-threshold=0.15] \
  *       [--notes="..."] [--user-id=<uuid>] [--force] [--no-iconik-write] [--no-webhook] [--live] [--json]
  *
  * Per asset: resolve the active version → pick the smallest CLOSED proxy (audio preferred) →
@@ -35,7 +35,8 @@ const has = (n: string) => args.includes(`--${n}`);
 const assetIds = (arg("asset") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const keyterms = parseKeyterms(arg("keyterms"));
 const language = arg("language") ?? "auto";
-const numSpeakers = arg("num-speakers") ? parseInt(arg("num-speakers")!, 10) : undefined;
+const numSpeakers = arg("num-speakers") ? parseInt(arg("num-speakers")!, 10) : undefined; // ElevenLabs: MAXIMUM speakers
+const diarizationThreshold = arg("diarization-threshold") ? parseFloat(arg("diarization-threshold")!) : (process.env.ELEVENLABS_DIARIZATION_THRESHOLD ? parseFloat(process.env.ELEVENLABS_DIARIZATION_THRESHOLD) : undefined);
 const notes = arg("notes");
 const userId = arg("user-id");
 const live = has("live");
@@ -92,8 +93,9 @@ async function one(assetId: string) {
   const webhookMetadata: Record<string, string> = { asset_id: assetId, version_id: versionId, profile: profileName ?? "" };
   if (userId) webhookMetadata.user_id = userId;
   if (notes) webhookMetadata.notes = notes.slice(0, 500);
+  if (keyterms.length) webhookMetadata.keyterms = keyterms.join(", ").slice(0, 500); // reused by the speaker-naming pass
   const opts = {
-    sourceUrl: dl.url, languageCode: language, numSpeakers, keyterms, webhook: useWebhook,
+    sourceUrl: dl.url, languageCode: language, numSpeakers, diarizationThreshold, keyterms, webhook: useWebhook,
     webhookId: process.env.ELEVENLABS_WEBHOOK_ID, webhookMetadata,
   };
   log(`  request: ${JSON.stringify(describeForm(await buildSttForm(opts)))}`);
