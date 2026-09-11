@@ -3,7 +3,7 @@
  * SUBMIT ICONIK ASSET(S) TO ASSEMBLYAI (async, webhook)
  *
  *   npx tsx scripts/assemblyai-submit.ts --profile=<profile> --asset=<uuid>[,<uuid>...] \
- *       [--keyterms="Paradisus Palma Real, McKenzie"] [--language=auto|en|es] [--num-speakers=N] \
+ *       [--keyterms="Paradisus Palma Real, McKenzie"] [--language=auto|en|es] [--num-speakers=6|6+|5-8] [--speaker-id-effort=low|medium] \
  *       [--speaker-names="Ben Higgins, McKenzie"] [--notes="..."] [--user-id=<uuid>] \
  *       [--no-webhook] [--live] [--json]
  *
@@ -25,10 +25,10 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
+import { parseSpeakerCount, initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
 import { getProfileFromArgs, getProfile } from "../src/config.ts";
 import { fetchAsset, resolveActiveVersion, freshProxyUrl } from "../src/lib/iconik-transcripts.ts";
-import { submitTranscript, buildSubmitBody, waitForTranscript, type AaiSubmitOpts } from "../src/lib/assemblyai.ts";
+import { submitTranscript, buildSubmitBody, waitForTranscript, parseSpeakerCount, type AaiSubmitOpts } from "../src/lib/assemblyai.ts";
 import { parseKeyterms } from "../src/lib/elevenlabs.ts";
 
 const profileName = getProfileFromArgs();
@@ -41,7 +41,8 @@ const has = (n: string) => args.includes(`--${n}`);
 const assetIds = (arg("asset") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const keyterms = parseKeyterms(arg("keyterms"));
 const language = arg("language") ?? "auto";
-const numSpeakers = arg("num-speakers") ? parseInt(arg("num-speakers")!, 10) : undefined;
+const speakerCount = parseSpeakerCount(arg("num-speakers")); // "6" exact · "6+" at least · "5-8" range
+const speakerIdEffort = (arg("speaker-id-effort") ?? process.env.ASSEMBLYAI_SPEAKER_ID_EFFORT ?? "medium") === "low" ? "low" as const : "medium" as const;
 const speakerNames = (arg("speaker-names") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const notes = arg("notes");
 const userId = arg("user-id");
@@ -84,7 +85,8 @@ async function one(assetId: string): Promise<Record<string, unknown>> {
     audioUrl: proxy.url,
     keyterms,
     language,
-    speakersExpected: numSpeakers,
+    ...speakerCount,
+    speakerIdEffort,
     speakerNames: speakerNames.length ? speakerNames : undefined,
     webhookUrl,
     webhookSecret,
@@ -131,7 +133,7 @@ async function one(assetId: string): Promise<Record<string, unknown>> {
 }
 
 async function main() {
-  log(`Profile: ${getCurrentProfileInfo().name} | ${live ? "LIVE" : "DRY-RUN"} | assets: ${assetIds.length} | language=${language} keyterms=${keyterms.length}${numSpeakers ? ` speakers=${numSpeakers}` : ""}${useWebhook ? "" : " (no webhook — will poll)"}`);
+  log(`Profile: ${getCurrentProfileInfo().name} | ${live ? "LIVE" : "DRY-RUN"} | assets: ${assetIds.length} | language=${language} keyterms=${keyterms.length}${JSON.stringify(speakerCount) ? ` speakers=${JSON.stringify(speakerCount)}` : ""}${useWebhook ? "" : " (no webhook — will poll)"}`);
   void profile;
   const results: Record<string, unknown>[] = [];
   let failed = 0;

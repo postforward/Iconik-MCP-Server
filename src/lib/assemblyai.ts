@@ -43,7 +43,13 @@ export interface AaiSubmitOpts {
   keyterms?: string[];
   /** "auto" (default) → language_detection; else ISO code such as "en" / "es". */
   language?: string;
+  /** Exact speaker count — only when certain (AssemblyAI: "use only when confident"). */
   speakersExpected?: number;
+  /** Bounds instead of an exact count: at least / at most this many speakers (speaker_options). */
+  speakersMin?: number;
+  speakersMax?: number;
+  /** Speaker identification effort: "low" (default) or "medium" (better names, slower). */
+  speakerIdEffort?: "low" | "medium";
   /** Known speaker names to bias identification (optional). */
   speakerNames?: string[];
   /** Default true — AssemblyAI infers real names from the audio. */
@@ -64,10 +70,17 @@ export function buildSubmitBody(o: AaiSubmitOpts): Record<string, unknown> {
     format_text: true,
   };
   if (o.speakersExpected && o.speakersExpected > 1) body.speakers_expected = o.speakersExpected;
+  else if ((o.speakersMin && o.speakersMin > 1) || (o.speakersMax && o.speakersMax > 1)) {
+    const so: Record<string, number> = {};
+    if (o.speakersMin && o.speakersMin > 1) so.min_speakers_expected = o.speakersMin;
+    if (o.speakersMax && o.speakersMax > 1) so.max_speakers_expected = Math.max(o.speakersMax, o.speakersMin ?? 0);
+    body.speaker_options = so;
+  }
   if (o.keyterms && o.keyterms.length) body.keyterms_prompt = o.keyterms.slice(0, 1000);
   if (!o.language || o.language === "auto") body.language_detection = true; else body.language_code = o.language;
   if (o.identifySpeakers !== false) {
     const si: Record<string, unknown> = { speaker_type: "name" };
+    if (o.speakerIdEffort === "medium") si.effort = "medium";
     if (o.speakerNames && o.speakerNames.length) si.speakers = o.speakerNames.map((name) => ({ name }));
     body.speech_understanding = { request: { speaker_identification: si } };
   }
@@ -144,8 +157,10 @@ export function assemblyaiToTranscript(t: AaiTranscript): { transcript: ElTransc
     const key = (raw ?? "").trim() || "?";
     if (speakerMap[key] == null) {
       speakerMap[key] = Object.keys(speakerMap).length;
-      const name = mapping[key] ?? (LETTER_LABEL.test(key) || DEFAULT_NAME.test(key) || key === "?" ? null : key);
-      if (name && !DEFAULT_NAME.test(name)) labels[String(speakerMap[key])] = name.trim();
+      // AssemblyAI's mapping is an identity ("B" → "B") for speakers it could not name — never a label
+      const candidate = (mapping[key] ?? key).trim();
+      const isPlaceholder = !candidate || candidate === "?" || LETTER_LABEL.test(candidate) || DEFAULT_NAME.test(candidate);
+      if (!isPlaceholder) labels[String(speakerMap[key])] = candidate;
     }
     return speakerMap[key];
   };
@@ -163,4 +178,14 @@ export function assemblyaiToTranscript(t: AaiTranscript): { transcript: ElTransc
   const lang = (t.language_code ?? "").toLowerCase().split(/[-_]/)[0];
   const transcript: ElTranscript = { language_code: lang, text: t.text ?? out.map((w) => w.text).join(" "), words: out, transcription_id: t.id, audio_duration_secs: t.audio_duration ?? null };
   return { transcript, speakerLabels: Object.keys(labels).length ? labels : undefined, speakerMap };
+}
+
+/** Parse the Send form's speaker-count text: "6" → exact, "6+" → at least 6, "5-8" → between 5 and 8. */
+export function parseSpeakerCount(raw: string | undefined | null): { speakersExpected?: number; speakersMin?: number; speakersMax?: number } {
+  const t = (raw ?? "").trim();
+  if (!t) return {};
+  let m = /^(\d+)\s*\+$/.exec(t); if (m) return { speakersMin: parseInt(m[1], 10) };
+  m = /^(\d+)\s*[-–]\s*(\d+)$/.exec(t); if (m) { const a = parseInt(m[1], 10), b = parseInt(m[2], 10); return { speakersMin: Math.min(a, b), speakersMax: Math.max(a, b) }; }
+  m = /^(\d+)$/.exec(t); if (m) return { speakersExpected: parseInt(m[1], 10) };
+  return {};
 }

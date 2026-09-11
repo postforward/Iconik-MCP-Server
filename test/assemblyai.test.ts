@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
-import { assemblyaiToTranscript, buildSubmitBody, isAssemblyAiTranscript, verifyWebhookHeader, type AaiTranscript } from "../src/lib/assemblyai.ts";
+import { assemblyaiToTranscript, buildSubmitBody, isAssemblyAiTranscript, verifyWebhookHeader, parseSpeakerCount, type AaiTranscript } from "../src/lib/assemblyai.ts";
 import { convertElevenLabsToSegments, isEditorExport } from "../src/lib/elevenlabs-to-iconik.ts";
 import { isHyperaudioProject } from "../src/lib/hyperaudio.ts";
 
@@ -32,6 +32,10 @@ test("assemblyai: inline names win, letters stay unnamed, utterances-only payloa
   const r = assemblyaiToTranscript(t);
   assert.deepEqual(r.speakerMap, { "Eric Lee": 0, C: 1 });
   assert.deepEqual(r.speakerLabels, { "0": "Eric Lee" });
+  // identity mapping for an unidentified speaker ("B" → "B", as AssemblyAI returns) must not become a name
+  const ident: AaiTranscript = { id: "y", status: "completed", audio_duration: 2, words: [{ text: "Hi", start: 0, end: 300, speaker: "A" }, { text: "Yo", start: 400, end: 700, speaker: "B" }],
+    speech_understanding: { response: { speaker_identification: { mapping: { A: "Ben Higgins", B: "B" } } } } };
+  assert.deepEqual(assemblyaiToTranscript(ident).speakerLabels, { "0": "Ben Higgins" });
   assert.equal(r.transcript.words.length, 3);
   assert.throws(() => assemblyaiToTranscript({ id: "e", status: "error", error: "boom" }), /boom/);
 });
@@ -46,6 +50,14 @@ test("assemblyai: submit body + sniffing + webhook header", () => {
   assert.deepEqual(b.speech_understanding.request.speaker_identification, { speaker_type: "name", speakers: [{ name: "Ben Higgins" }] });
   assert.equal(b.webhook_auth_header_name, "x-aai-secret");
   assert.equal(b.webhook_auth_header_value, "s3cret");
+  const rng = buildSubmitBody({ audioUrl: "u", speakersMin: 6, speakersMax: 8, speakerIdEffort: "medium" }) as any;
+  assert.equal(rng.speakers_expected, undefined);
+  assert.deepEqual(rng.speaker_options, { min_speakers_expected: 6, max_speakers_expected: 8 });
+  assert.equal(rng.speech_understanding.request.speaker_identification.effort, "medium");
+  assert.deepEqual(parseSpeakerCount("6"), { speakersExpected: 6 });
+  assert.deepEqual(parseSpeakerCount("6+"), { speakersMin: 6 });
+  assert.deepEqual(parseSpeakerCount("5-8"), { speakersMin: 5, speakersMax: 8 });
+  assert.deepEqual(parseSpeakerCount(""), {});
   const es = buildSubmitBody({ audioUrl: "u", language: "es", identifySpeakers: false }) as any;
   assert.equal(es.language_code, "es"); assert.equal(es.language_detection, undefined); assert.equal(es.speech_understanding, undefined);
   assert.equal(isAssemblyAiTranscript(fx), true);
