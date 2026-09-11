@@ -1,0 +1,297 @@
+{
+ "id": "aai-test-1",
+ "status": "completed",
+ "audio_url": "https://example/x.mp3",
+ "audio_duration": 25.0,
+ "language_code": "en_us",
+ "text": "A destination wedding promises the trip of a lifetime. We have a great um, opportunity for them. Okay.",
+ "words": [
+  {
+   "text": "A",
+   "start": 7530,
+   "end": 7620,
+   "confidence": 0.98,
+   "speaker": "A"
+  },
+  {
+   "text": "destination",
+   "start": 7640,
+   "end": 8230,
+   "confidence": 0.98,
+   "speaker": "A"
+  },
+  {
+   "text": "wedding",
+   "start": 8320,
+   "end": 8640,
+   "confidence": 0.98,
+   "speaker": "A"
+  },
+  {
+   "text": "promises",
+   "start": 8700,
+   "end": 9100,
+   "confidence": 0.61,
+   "speaker": "A"
+  },
+  {
+   "text": "the",
+   "start": 9120,
+   "end": 9200,
+   "confidence": 0.98,
+   "speaker": "A"
+  },
+  {
+   "text": "trip",
+   "start": 9220,
+   "end": 9500,
+   "confidence": 0.98,
+   "speaker": "A"
+  },
+  {
+   "text": "of",
+   "start": 9520,
+   "end": 9580,
+   "confidence": 0.98,
+   "speaker": "A"
+  },
+  {
+   "text": "a",
+   "start": 9600,
+   "end": 9640,
+   "confidence": 0.98,
+   "speaker": "A"
+  },
+  {
+   "text": "lifetime.",
+   "start": 9660,
+   "end": 10380,
+   "confidence": 0.98,
+   "speaker": "A"
+  },
+  {
+   "text": "We",
+   "start": 13500,
+   "end": 13600,
+   "confidence": 0.98,
+   "speaker": "B"
+  },
+  {
+   "text": "have",
+   "start": 13620,
+   "end": 13800,
+   "confidence": 0.98,
+   "speaker": "B"
+  },
+  {
+   "text": "a",
+   "start": 13820,
+   "end": 13860,
+   "confidence": 0.98,
+   "speaker": "B"
+  },
+  {
+   "text": "great",
+   "start": 13880,
+   "end": 14100,
+   "confidence": 0.98,
+   "speaker": "B"
+  },
+  {
+   "text": "um,",
+   "start": 14120,
+   "end": 14300,
+   "confidence": 0.55,
+   "speaker": "B"
+  },
+  {
+   "text": "opportunity",
+   "start": 14320,
+   "end": 14800,
+   "confidence": 0.98,
+   "speaker": "B"
+  },
+  {
+   "text": "for",
+   "start": 14820,
+   "end": 14900,
+   "confidence": 0.98,
+   "speaker": "B"
+  },
+  {
+   "text": "them.",
+   "start": 14920,
+   "end": 15000,
+   "confidence": 0.98,
+   "speaker": "B"
+  },
+  {
+   "text": "Okay.",
+   "start": 19000,
+   "end": 19400,
+   "confidence": 0.98,
+   "speaker": "A"
+  }
+ ],
+ "utterances": [
+  {
+   "speaker": "A",
+   "start": 7530,
+   "end": 10380,
+   "text": "A destination wedding promises the trip of a lifetime.",
+   "words": [
+    {
+     "text": "A",
+     "start": 7530,
+     "end": 7620,
+     "confidence": 0.98,
+     "speaker": "A"
+    },
+    {
+     "text": "destination",
+     "start": 7640,
+     "end": 8230,
+     "confidence": 0.98,
+     "speaker": "A"
+    },
+    {
+     "text": "wedding",
+     "start": 8320,
+     "end": 8640,
+     "confidence": 0.98,
+     "speaker": "A"
+    },
+    {
+     "text": "promises",
+     "start": 8700,
+     "end": 9100,
+     "confidence": 0.61,
+     "speaker": "A"
+    },
+    {
+     "text": "the",
+     "start": 9120,
+     "end": 9200,
+     "confidence": 0.98,
+     "speaker": "A"
+    },
+    {
+     "text": "trip",
+     "start": 9220,
+     "end": 9500,
+     "confidence": 0.98,
+     "speaker": "A"
+    },
+    {
+     "text": "of",
+     "start": 9520,
+     "end": 9580,
+     "confidence": 0.98,
+     "speaker": "A"
+    },
+    {
+     "text": "a",
+     "start": 9600,
+     "end": 9640,
+     "confidence": 0.98,
+     "speaker": "A"
+    },
+    {
+     "text": "lifetime.",
+     "start": 9660,
+     "end": 10380,
+     "confidence": 0.98,
+     "speaker": "A"
+    }
+   ]
+  },
+  {
+   "speaker": "B",
+   "start": 13500,
+   "end": 15000,
+   "text": "...",
+   "words": [
+    {
+     "text": "We",
+     "start": 13500,
+     "end": 13600,
+     "confidence": 0.98,
+     "speaker": "B"
+    },
+    {
+     "text": "have",
+     "start": 13620,
+     "end": 13800,
+     "confidence": 0.98,
+     "speaker": "B"
+    },
+    {
+     "text": "a",
+     "start": 13820,
+     "end": 13860,
+     "confidence": 0.98,
+     "speaker": "B"
+    },
+    {
+     "text": "great",
+     "start": 13880,
+     "end": 14100,
+     "confidence": 0.98,
+     "speaker": "B"
+    },
+    {
+     "text": "um,",
+     "start": 14120,
+     "end": 14300,
+     "confidence": 0.55,
+     "speaker": "B"
+    },
+    {
+     "text": "opportunity",
+     "start": 14320,
+     "end": 14800,
+     "confidence": 0.98,
+     "speaker": "B"
+    },
+    {
+     "text": "for",
+     "start": 14820,
+     "end": 14900,
+     "confidence": 0.98,
+     "speaker": "B"
+    },
+    {
+     "text": "them.",
+     "start": 14920,
+     "end": 15000,
+     "confidence": 0.98,
+     "speaker": "B"
+    }
+   ]
+  },
+  {
+   "speaker": "A",
+   "start": 19000,
+   "end": 19400,
+   "text": "Okay.",
+   "words": [
+    {
+     "text": "Okay.",
+     "start": 19000,
+     "end": 19400,
+     "confidence": 0.98,
+     "speaker": "A"
+    }
+   ]
+  }
+ ],
+ "speech_understanding": {
+  "response": {
+   "speaker_identification": {
+    "mapping": {
+     "A": "Sabina Ortiz"
+    }
+   }
+  }
+ }
+}

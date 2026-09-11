@@ -8,6 +8,8 @@
  *   --from-webhook-payload=<file>   file written by the n8n webhook: {signature, raw_body_b64, received_at}
  *                                   or a raw ElevenLabs webhook JSON body (then --skip-verify is required)
  *   --transcription-id=<id>         GET /v1/speech-to-text/transcripts/{id}
+ *   --from-assemblyai=<id>          AssemblyAI GET /v2/transcript/{id} (names from speaker identification); --from-json
+ *                                   also sniffs a saved AssemblyAI transcript JSON
  *   --from-json=<file> [--format=webhook|transcript|srt|vtt]   editor export / saved transcript (format by extension)
  *                                   also sniffs a Hyperaudio Lite Editor project (format:"hyperaudio") → kind hyperaudio-json;
  *                                   pair with --scores=<sidecar.json> (from transcript-export-hyperaudio.ts) to keep confidences
@@ -32,6 +34,7 @@ import { getTranscript, verifyWebhook, parseWebhookMetadata, editorUrl, type ElT
 import { convertElevenLabsToSegments, convertSrtOrVtt, toBulkObjects, deriveSpeakerLabels, isEditorExport, editorExportToTranscript, type IkSegmentDraft } from "../src/lib/elevenlabs-to-iconik.ts";
 import { readTracking, writeTracking, TrackingNotConfigured } from "../src/lib/elevenlabs-tracking.ts";
 import { isHyperaudioProject, hyperaudioToTranscript, type ScoreMap } from "../src/lib/hyperaudio.ts";
+import { getTranscript as getAaiTranscript, assemblyaiToTranscript, isAssemblyAiTranscript } from "../src/lib/assemblyai.ts";
 import { fetchAllTranscription as libFetchAllTranscription, countTranscription, resolveActiveVersion, fetchTranscriptionProperties, freshProxyUrl as libFreshProxyUrl, normLang, type IkTranscriptionSegment } from "../src/lib/iconik-transcripts.ts";
 
 const profileName = getProfileFromArgs();
@@ -83,6 +86,13 @@ async function resolveSource(): Promise<Source> {
   }
   const tid = arg("transcription-id");
   if (tid) { const t = await getTranscript(tid); return { kind: "api", transcript: t, transcriptionId: tid, speakerLabels: deriveSpeakerLabels(t), description: `ElevenLabs GET transcript ${tid}` }; }
+  const aai = arg("from-assemblyai");
+  if (aai) {
+    const t = await getAaiTranscript(aai);
+    if (t.status !== "completed") throw new Error(`AssemblyAI transcript ${aai} is ${t.status}${t.error ? ": " + t.error : ""}`);
+    const r = assemblyaiToTranscript(t);
+    return { kind: "assemblyai", transcript: r.transcript, transcriptionId: aai, speakerLabels: r.speakerLabels, language: r.transcript.language_code || undefined, description: `AssemblyAI transcript ${aai} (${r.transcript.words.length} words, speakers ${Object.entries(r.speakerMap).map(([n, i]) => `${n}=${i}`).join(", ")}${r.speakerLabels ? ", names " + Object.values(r.speakerLabels).join(", ") : ""})`, extra: { engine: "AssemblyAI", speaker_map: r.speakerMap } };
+  }
   const fj = arg("from-json");
   if (fj) {
     const ext = (arg("format") ?? path.extname(fj).slice(1)).toLowerCase();
@@ -103,6 +113,7 @@ async function resolveSource(): Promise<Source> {
         description: `Hyperaudio project ${fj} (${st.words} words, ${st.paragraphs} paragraphs, ${st.struck} struck, ${st.inserted} edited/inserted${scores ? "" : ", NO score sidecar"}; speakers ${Object.entries(r.speakerMap).map(([n, i]) => `${n}=${i}`).join(", ")})`,
         extra: { hyperaudio_stats: st, speaker_map: r.speakerMap, exported_at: prov.exportedAt ?? null, revision: prov.revision ?? null } };
     }
+    if (isAssemblyAiTranscript(j)) { const r = assemblyaiToTranscript(j); return { kind: "assemblyai-json", transcript: r.transcript, transcriptionId: j.id, speakerLabels: r.speakerLabels, language: r.transcript.language_code || undefined, description: `AssemblyAI JSON ${fj} (${r.transcript.words.length} words${r.speakerLabels ? ", names " + Object.values(r.speakerLabels).join(", ") : ""})`, extra: { engine: "AssemblyAI", speaker_map: r.speakerMap } }; }
     if (j?.data?.transcription) { const md = parseWebhookMetadata(j.data.webhook_metadata); return { kind: "webhook-json", transcript: j.data.transcription, assetId: md.asset_id, versionId: md.version_id, transcriptionId: j.data.transcription.transcription_id ?? j.data.request_id, speakerLabels: deriveSpeakerLabels(j), description: `webhook JSON ${fj}` }; }
     if (Array.isArray(j?.words)) return { kind: "transcript-json", transcript: j, transcriptionId: j.transcription_id ?? undefined, speakerLabels: deriveSpeakerLabels(j), language: j.language_code, description: `transcript JSON ${fj}` };
     if (isEditorExport(j)) { const { transcript, speakerLabels } = editorExportToTranscript(j); return { kind: "editor-json", transcript, speakerLabels, language: j.language_code, description: `ElevenLabs editor export ${fj} (${j.segments.length} editor segments${speakerLabels ? ", named speakers: " + Object.values(speakerLabels).join(", ") : ""})` }; }
@@ -207,7 +218,7 @@ async function main() {
     bulkObjects = toBulkObjects(segments, versionId, transcriptionId);
     speakerLabels = arg("speaker-labels") ? JSON.parse(arg("speaker-labels")!) : src.speakerLabels;
     if (["api", "tracked", "srt", "vtt", "transcript-json", "editor-json", "hyperaudio-json"].includes(src.kind)) statusOnSuccess = "EDIT_IMPORTED";
-    (main as any).sourceTranscriptionId = src.kind === "hyperaudio-json" ? undefined : src.transcriptionId;
+    (main as any).sourceTranscriptionId = ["hyperaudio-json", "assemblyai", "assemblyai-json"].includes(src.kind) ? undefined : src.transcriptionId;
     (main as any).sourceExtra = src.extra ?? null;
   }
 
@@ -221,7 +232,7 @@ async function main() {
   log(`Existing TRANSCRIPTION segments on asset: ${existing}${keepExisting ? " (kept)" : " (will be deleted)"}`);
   if (!live) {
     log("\nDRY-RUN — no changes made. Re-run with --live.");
-    if (jsonOut) console.log(JSON.stringify({ dry_run: true, asset_id: assetId, version_id: versionId, source: sourceDesc, segments: bulkObjects.length, speakers, existing_segments: existing, speaker_labels: speakerLabels ?? null, language: normLang(language) ?? null, engine: arg("engine") ?? "ElevenLabs", first_text: (bulkObjects[0] as any)?.segment_text ?? null, last_text: (bulkObjects[bulkObjects.length - 1] as any)?.segment_text ?? null, extra: (main as any).sourceExtra ?? null }));
+    if (jsonOut) console.log(JSON.stringify({ dry_run: true, asset_id: assetId, version_id: versionId, source: sourceDesc, segments: bulkObjects.length, speakers, existing_segments: existing, speaker_labels: speakerLabels ?? null, language: normLang(language) ?? null, engine: arg("engine") ?? ((main as any).sourceExtra?.engine as string | undefined) ?? "ElevenLabs", first_text: (bulkObjects[0] as any)?.segment_text ?? null, last_text: (bulkObjects[bulkObjects.length - 1] as any)?.segment_text ?? null, extra: (main as any).sourceExtra ?? null }));
     return;
   }
 
@@ -240,8 +251,10 @@ async function main() {
     if (oldProps.length) { await deleteProperties(assetId, versionId!, oldProps); log(`Deleted ${oldProps.length} old transcription properties record(s)`); }
   }
   // 3. transcription properties FIRST — iconik assigns the id that segments must carry as transcription_id
-  const engineName = arg("engine") ?? "ElevenLabs";
-  const propsBody: Record<string, unknown> = { engine_info: { name: engineName, model: engineName === "ElevenLabs" ? "scribe_v2" : "edited", version: new Date().toISOString().slice(0, 10), type: "EXTERNAL" } };
+  const srcEngine = ((main as any).sourceExtra?.engine as string | undefined);
+  const engineName = arg("engine") ?? srcEngine ?? "ElevenLabs";
+  const engineModel = engineName === "ElevenLabs" ? "scribe_v2" : engineName === "AssemblyAI" ? "universal-3-5-pro" : "edited";
+  const propsBody: Record<string, unknown> = { engine_info: { name: engineName, model: engineModel, version: new Date().toISOString().slice(0, 10), type: "EXTERNAL" } };
   const lang = normLang(language); if (lang) propsBody.language = lang;
   if (speakerLabels) propsBody.speaker_labels = speakerLabels;
   if (!restore) {
@@ -275,7 +288,7 @@ async function main() {
     log(`Tracking: ${verified ? statusOnSuccess : "FAILED"}`);
   } catch (e) { if (!(e instanceof TrackingNotConfigured)) log(`  ⚠ tracking write failed: ${e instanceof Error ? e.message : e}`); else log("  (tracking view not configured — skipped)"); }
 
-  const summary = { asset_id: assetId, version_id: versionId, transcription_id: transcriptionId, source: sourceDesc, segments: bulkObjects.length, created_ok: ok, uncertain, verified, backup: b.file, speaker_labels: speakerLabels ?? null, editor_url: (main as any).sourceTranscriptionId ? editorUrl((main as any).sourceTranscriptionId) : null, asset_url: `https://app.iconik.io/asset/${assetId}`, proxy_url: await freshProxyUrl(assetId), language: normLang(language) ?? null, engine: arg("engine") ?? "ElevenLabs", extra: (main as any).sourceExtra ?? null };
+  const summary = { asset_id: assetId, version_id: versionId, transcription_id: transcriptionId, source: sourceDesc, segments: bulkObjects.length, created_ok: ok, uncertain, verified, backup: b.file, speaker_labels: speakerLabels ?? null, editor_url: (main as any).sourceTranscriptionId ? editorUrl((main as any).sourceTranscriptionId) : null, asset_url: `https://app.iconik.io/asset/${assetId}`, proxy_url: await freshProxyUrl(assetId), language: normLang(language) ?? null, engine: arg("engine") ?? ((main as any).sourceExtra?.engine as string | undefined) ?? "ElevenLabs", extra: (main as any).sourceExtra ?? null };
   fs.mkdirSync("reports", { recursive: true });
   fs.writeFileSync(path.join("reports", `elevenlabs-import-${assetId}-${Date.now()}.json`), JSON.stringify(summary, null, 2));
   if (jsonOut) console.log(JSON.stringify(summary));
