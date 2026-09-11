@@ -57,13 +57,15 @@ export async function proposeSpeakerNames(segments: IkTranscriptionSegment[], hi
   const { system, user } = buildPrompt(hints, ids);
   const client = new Anthropic();
   const model = opts.model ?? DEFAULT_MODEL;
+  // max_tokens covers the model's thinking too; 4000 truncated the JSON on an 870-segment transcript
   const response = await client.messages.parse({
     model,
-    max_tokens: 4000,
+    max_tokens: 16000,
     system,
     messages: [{ role: "user", content: user + text }],
     output_config: { format: zodOutputFormat(Schema) },
   });
+  if (response.stop_reason === "max_tokens") throw new Error("the model ran out of output tokens (raise max_tokens)");
   if (response.stop_reason === "refusal" || !response.parsed_output) throw new Error(`no usable output (stop_reason=${response.stop_reason})`);
   const byId = new Map(response.parsed_output.speakers.map((s) => [s.speaker, s]));
   const proposals: SpeakerProposal[] = ids.map((id) => {

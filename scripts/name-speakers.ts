@@ -3,11 +3,11 @@
  * NAME the speakers of an asset's iconik transcript with Claude's best guess from context.
  *
  *   npx tsx scripts/name-speakers.ts --profile=<profile> --asset=<uuid> [--keyterms="Ben Higgins, McKenzie"] [--notes="..."]
- *       [--min-confidence=0.7] [--overwrite] [--model=claude-opus-5] [--live] [--json]
+ *       [--min-confidence=0.5] [--overwrite] [--model=claude-opus-5] [--live] [--json]
  *
  * Reads the current transcription (segments + properties), asks Claude for one name per speaker number
  * with a confidence, and (live) PATCHes speaker_labels on the transcription properties. Existing names are
- * kept unless --overwrite; guesses under --min-confidence stay "Speaker N" for the team to fix in the editor.
+ * kept unless --overwrite; guesses under --min-confidence (default 0.5) stay "Speaker N" for the team to fix in the editor.
  * Dry-run prints the guesses. Env: ANTHROPIC_API_KEY.
  */
 import { initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
@@ -21,7 +21,7 @@ const args = process.argv.slice(2);
 const arg = (n: string) => args.find((a) => a.startsWith(`--${n}=`))?.split("=").slice(1).join("=");
 const has = (n: string) => args.includes(`--${n}`);
 const assetId = arg("asset"); const live = has("live"); const jsonOut = has("json"); const overwrite = has("overwrite");
-const minConfidence = arg("min-confidence") ? parseFloat(arg("min-confidence")!) : 0.7;
+const minConfidence = arg("min-confidence") ? parseFloat(arg("min-confidence")!) : 0.5;
 if (!assetId) { console.error("--asset is required"); process.exit(1); }
 const log = (...a: unknown[]) => { if (!jsonOut) console.log(...a); else console.error(...a); };
 
