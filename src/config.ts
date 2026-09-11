@@ -10,6 +10,11 @@ export interface IconikProfile {
   app_id: string;
   auth_token: string;
   api_url?: string; // Optional, defaults to https://app.iconik.io/API/
+  /** Per-client ids for the ElevenLabs transcription pipeline (created by scripts/elevenlabs-setup-iconik.ts). */
+  elevenlabs?: {
+    send_view_id?: string; // metadata view shown by the "Send to ElevenLabs" custom action
+    tracking_view_id?: string; // metadata view holding ElevenLabsTranscriptionId / Status / Updated
+  };
 }
 
 export interface Config {

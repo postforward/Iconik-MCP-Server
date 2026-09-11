@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "tsx --test test/*.test.ts"
   },
   "keywords": [
     "mcp",
@@ -21,8 +22,11 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
+    "@elevenlabs/elevenlabs-js": "^2.67.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "dotenv": "^17.2.4",
+    "uuid": "^14.0.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

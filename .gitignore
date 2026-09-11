@@ -1,4 +1,4 @@
-# Dependencies
+c# Dependencies
 node_modules/
 
 # Build output
@@ -67,3 +67,19 @@ archive-state.json
 # Local config files for batch scripts (may contain client-specific UUIDs)
 configs/
 .backups-do-not-commit
+
+# Warm reclassification — operational runbook + audit dumps (instance IDs, client names)
+docs/warm-reclassification-runbook.md
+warm-audit/
+
+# Legacy cloud decommission audit — census dumps and reports contain client
+# project paths, storage UUIDs and bucket names
+legacy/
+census/
+reports/
+
+# ElevenLabs pipeline runtime dirs
+inbox/
+backups/
+logs/
+test/fixtures/*.real.json
