@@ -114,7 +114,8 @@ async function one(assetId: string) {
   }
 
   out.request_id = res.request_id; out.transcription_id = res.transcription_id;
-  if (res.transcription_id) out.editor_url = editorUrl(res.transcription_id);
+  // API transcripts are not visible in the dashboard editor (verified 2026-09-10); only emit a link if a template is configured.
+  if (res.transcription_id && process.env.ELEVENLABS_EDITOR_URL_TEMPLATE) out.editor_url = editorUrl(res.transcription_id);
   if (res.transcript) {
     fs.mkdirSync("inbox", { recursive: true });
     const f = path.join("inbox", `transcript-${assetId}-${Date.now()}.json`);
