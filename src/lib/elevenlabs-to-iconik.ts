@@ -104,7 +104,7 @@ function toTokens(words: ElWord[], opts: Required<ConvertOptions>): Tok[] {
       value,
       start_ms: Math.max(start, lastEnd),
       end_ms: Math.max(end, Math.max(start, lastEnd)),
-      score: isEvent ? 0.5 : logprobToScore(w.logprob),
+      score: w.score != null && Number.isFinite(w.score) ? Math.round(Math.min(1, Math.max(0, w.score)) * 100) / 100 : isEvent ? 0.5 : logprobToScore(w.logprob),
       speaker: speakerIdToInt(w.speaker_id),
       isEvent,
       brk: !!w.segment_break,

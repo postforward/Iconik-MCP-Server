@@ -26,6 +26,8 @@ export interface ElWord {
   characters?: unknown;
   /** Internal: set by the editor-export flattener on the first word of each human-edited segment. */
   segment_break?: boolean;
+  /** Internal: explicit 0..1 confidence (Hyperaudio round-trip sidecar); wins over logprob when set. */
+  score?: number;
 }
 
 export interface ElTranscript {

@@ -83,3 +83,7 @@ inbox/
 backups/
 logs/
 test/fixtures/*.real.json
+
+# Transcript editor platform runtime data (asset titles, snapshots)
+editor-projects/
+editor-history/

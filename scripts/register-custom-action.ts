@@ -5,6 +5,7 @@
  *   npx tsx scripts/register-custom-action.ts --profile=<profile> --context=ASSET \
  *     --title="Send to ElevenLabs (transcribe)" --url=https://<your-n8n-host>/webhook/elevenlabs-send \
  *     [--metadata-view=<view uuid>]          # iconik shows this view as a form before POSTing
+ *     [--type=POST|OPEN]                     # OPEN = iconik opens the URL in a new tab (default POST)
  *   npx tsx scripts/register-custom-action.ts --profile=<profile> --context=ASSET --list
  *   npx tsx scripts/register-custom-action.ts --profile=<profile> --context=ASSET --disable=<action id>   (or --enable=)
  *   npx tsx scripts/register-custom-action.ts --profile=<profile> --context=ASSET --delete=<action id>
@@ -22,6 +23,7 @@ const context = arg("context", "COLLECTION")!;
 const title = arg("title", "Custom Action")!;
 const url = arg("url");
 const metadataView = arg("metadata-view");
+const actionType = (arg("type", "POST") || "POST").toUpperCase();
 
 async function setDisabled(id: string, disabled: boolean) {
   const cur = await iconikRequest<any>(`assets/v1/custom_actions/${context}/${id}/`);
@@ -44,7 +46,7 @@ async function setDisabled(id: string, disabled: boolean) {
     return;
   }
   if (!url) { console.error("--url is required (the n8n webhook URL)"); process.exit(1); }
-  const body: Record<string, unknown> = { title, url, type: "POST", context };
+  const body: Record<string, unknown> = { title, url, type: actionType, context };
   if (metadataView) body.metadata_view = metadataView;
   const res = await iconikRequest<any>(`assets/v1/custom_actions/${context}/`, { method: "POST", body: JSON.stringify(body), noRetry5xx: true } as any);
   console.log("Created custom action:");
