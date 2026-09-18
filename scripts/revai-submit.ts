@@ -32,7 +32,7 @@ import * as path from "path";
 import { initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
 import { getProfileFromArgs, getProfile } from "../src/config.ts";
 import { fetchAsset, resolveActiveVersion, freshProxyUrl, fetchAllTranscription, fetchTranscriptionProperties, pickTranscription } from "../src/lib/iconik-transcripts.ts";
-import { submitJob, buildJobBody, waitForJob, type RevSubmitOpts } from "../src/lib/revai.ts";
+import { submitJob, buildJobBody, waitForJob, getJob, type RevSubmitOpts } from "../src/lib/revai.ts";
 import { parseKeyterms } from "../src/lib/elevenlabs.ts";
 
 const profileName = getProfileFromArgs();
@@ -163,6 +163,13 @@ async function one(assetId: string): Promise<Record<string, unknown>> {
   const res = await submitJob(opts);
   out.job_id = res.id;
   out.status = res.status;
+  // duration for the cost estimate: Rev.ai fills duration_seconds shortly after creation
+  let durationSec: number | null = typeof (res as any).duration_seconds === "number" ? (res as any).duration_seconds : null;
+  if (durationSec == null) { try { await new Promise((r) => setTimeout(r, 1500)); const jb = await getJob(res.id); if (typeof jb.duration_seconds === "number") durationSec = jb.duration_seconds; } catch { /* estimate stays null */ } }
+  const rate = testMode ? 0 : 1.99 + (rush ? 1.25 : 0) + (verbatim ? 0.5 : 0);
+  out.duration_seconds = durationSec;
+  out.est_cost_usd = durationSec != null ? Math.round(durationSec / 60 * rate * 100) / 100 : null;
+  out.rate_per_min = rate;
   out.ok = true;
 
   if (useWebhook) {

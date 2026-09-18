@@ -32,7 +32,7 @@ export interface RevSubmitOpts {
 }
 export interface RevJob { id: string; status: "in_progress" | "transcribed" | "failed"; type?: string; created_on?: string; completed_on?: string | null; failure_detail?: string | null; duration_seconds?: number | null; metadata?: string | null; [k: string]: unknown }
 export interface RevElement { type: "text" | "punct" | "unknown"; value: string; ts?: number; end_ts?: number; confidence?: number }
-export interface RevMonologue { speaker: number; elements: RevElement[] }
+export interface RevMonologue { speaker: number; speaker_info?: { id?: number; display_name?: string } | null; elements: RevElement[] }
 export interface RevTranscript { monologues: RevMonologue[]; [k: string]: unknown }
 
 export function buildJobBody(o: RevSubmitOpts): Record<string, unknown> {
@@ -95,16 +95,20 @@ export function isRevTranscript(j: unknown): j is RevTranscript {
  * Rev.ai transcript → engine-agnostic transcript. Monologues are speaker turns (hard segment breaks);
  * "punct" elements are glued onto the preceding word ("together" + "." → "together."); "unknown" =
  * inaudible → "<inaudible>" audio event; confidence → score (human transcripts usually carry none → 1.0).
- * Rev.ai speaker ints are 0-based already; names are not in the transcript (speaker_names only guides the
- * transcriber), so speaker labels come from the LLM naming pass or the editor.
+ * Rev.ai speaker ints are 0-based; human jobs given speaker_names return each monologue's name in
+ * speaker_info.display_name (verified on a real job 2026-09-18) → speaker labels; the naming pass fills the rest.
  */
-export function revToTranscript(t: RevTranscript): { transcript: ElTranscript; speakers: number[] } {
+export function revToTranscript(t: RevTranscript): { transcript: ElTranscript; speakers: number[]; speakerLabels?: Record<string, string> } {
   const words: ElWord[] = [];
   const speakers = new Set<number>();
+  const labels: Record<string, string> = {};
   let lastEnd = 0;
   for (const m of t.monologues ?? []) {
     const spk = Number.isInteger(m.speaker) ? m.speaker : 0;
     speakers.add(spk);
+    // human jobs given speaker_names label monologues: speaker_info.display_name ("Speaker N" = unnamed)
+    const dn = (m.speaker_info?.display_name ?? "").trim();
+    if (dn && !/^speaker[ _]?\d+$/i.test(dn) && !labels[String(spk)]) labels[String(spk)] = dn;
     let first = true;
     for (const el of m.elements ?? []) {
       if (el.type === "punct") {
@@ -124,5 +128,5 @@ export function revToTranscript(t: RevTranscript): { transcript: ElTranscript; s
     }
   }
   const transcript: ElTranscript = { language_code: "", text: words.filter((w) => w.type === "word").map((w) => w.text).join(" "), words };
-  return { transcript, speakers: [...speakers].sort((a, b) => a - b) };
+  return { transcript, speakers: [...speakers].sort((a, b) => a - b), speakerLabels: Object.keys(labels).length ? labels : undefined };
 }

@@ -93,7 +93,7 @@ async function resolveSource(): Promise<Source> {
     const job = await getRevJob(rev);
     if (job.status !== "transcribed") throw new Error(`Rev.ai job ${rev} is ${job.status}${job.failure_detail ? ": " + job.failure_detail : ""}`);
     const r = revToTranscript(await getRevTranscript(rev));
-    return { kind: "revai", transcript: r.transcript, transcriptionId: rev, language: arg("language"), description: `Rev.ai ${job.type ?? ""} job ${rev} (${r.transcript.words.length} words, speakers ${r.speakers.join(",")})`, extra: { engine: "Rev.ai", job_type: job.type ?? null } };
+    return { kind: "revai", transcript: r.transcript, transcriptionId: rev, speakerLabels: r.speakerLabels, language: arg("language"), description: `Rev.ai ${job.type ?? ""} job ${rev} (${r.transcript.words.length} words, speakers ${r.speakers.join(",")}${r.speakerLabels ? ", names " + Object.values(r.speakerLabels).join(", ") : ""})`, extra: { engine: "Rev.ai", job_type: job.type ?? null } };
   }
   const aai = arg("from-assemblyai");
   if (aai) {
@@ -122,7 +122,7 @@ async function resolveSource(): Promise<Source> {
         description: `Hyperaudio project ${fj} (${st.words} words, ${st.paragraphs} paragraphs, ${st.struck} struck, ${st.inserted} edited/inserted${scores ? "" : ", NO score sidecar"}; speakers ${Object.entries(r.speakerMap).map(([n, i]) => `${n}=${i}`).join(", ")})`,
         extra: { hyperaudio_stats: st, speaker_map: r.speakerMap, exported_at: prov.exportedAt ?? null, revision: prov.revision ?? null } };
     }
-    if (isRevTranscript(j)) { const r = revToTranscript(j); return { kind: "revai-json", transcript: r.transcript, language: arg("language"), description: `Rev.ai transcript JSON ${fj} (${r.transcript.words.length} words, speakers ${r.speakers.join(",")})`, extra: { engine: "Rev.ai" } }; }
+    if (isRevTranscript(j)) { const r = revToTranscript(j); return { kind: "revai-json", transcript: r.transcript, speakerLabels: r.speakerLabels, language: arg("language"), description: `Rev.ai transcript JSON ${fj} (${r.transcript.words.length} words, speakers ${r.speakers.join(",")})`, extra: { engine: "Rev.ai" } }; }
     if (isAssemblyAiTranscript(j)) { const r = assemblyaiToTranscript(j); return { kind: "assemblyai-json", transcript: r.transcript, transcriptionId: j.id, speakerLabels: r.speakerLabels, language: r.transcript.language_code || undefined, description: `AssemblyAI JSON ${fj} (${r.transcript.words.length} words${r.speakerLabels ? ", names " + Object.values(r.speakerLabels).join(", ") : ""})`, extra: { engine: "AssemblyAI", speaker_map: r.speakerMap } }; }
     if (j?.data?.transcription) { const md = parseWebhookMetadata(j.data.webhook_metadata); return { kind: "webhook-json", transcript: j.data.transcription, assetId: md.asset_id, versionId: md.version_id, transcriptionId: j.data.transcription.transcription_id ?? j.data.request_id, speakerLabels: deriveSpeakerLabels(j), description: `webhook JSON ${fj}` }; }
     if (Array.isArray(j?.words)) return { kind: "transcript-json", transcript: j, transcriptionId: j.transcription_id ?? undefined, speakerLabels: deriveSpeakerLabels(j), language: j.language_code, description: `transcript JSON ${fj}` };

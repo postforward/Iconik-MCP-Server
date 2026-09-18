@@ -19,6 +19,10 @@ test("rev.ai → transcript → iconik segments: punctuation glued, turns = brea
   assert.deepEqual(segments.map((s) => s.transcription.speaker), [0, 1, 0]);
   assert.equal(segments[0].time_start_milliseconds, 7530);
   assert.equal(segments[0].transcription.words[0].score, 1);
+  // speaker_info.display_name (human jobs given speaker_names) → labels; "Speaker N" stays unnamed
+  const named: RevTranscript = { monologues: [{ speaker: 0, speaker_info: { id: 0, display_name: "McKenzie" }, elements: [{ type: "text", value: "Hi", ts: 0, end_ts: 0.5 }] }, { speaker: 1, speaker_info: { id: 1, display_name: "Speaker 2" }, elements: [{ type: "text", value: "Yo", ts: 1, end_ts: 1.5 }] }] };
+  assert.deepEqual(revToTranscript(named).speakerLabels, { "0": "McKenzie" });
+  assert.equal(revToTranscript(fx).speakerLabels, undefined);
 });
 
 test("rev.ai: job body, sniffing, callback auth", () => {
