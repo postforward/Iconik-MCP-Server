@@ -44,7 +44,8 @@ export function buildJobBody(o: RevSubmitOpts): Record<string, unknown> {
   if (o.metadata) body.metadata = o.metadata.slice(0, 500);
   if (o.speakerNames && o.speakerNames.length) body.speaker_names = o.speakerNames.slice(0, 100).map((n) => ({ display_name: n.slice(0, 50) }));
   if (o.vocabulary && o.vocabulary.length) body.custom_vocabularies = [{ phrases: [...new Set(o.vocabulary.map((v) => v.trim()).filter(Boolean))].slice(0, 6000) }];
-  if (o.speakersCount && o.speakersCount > 0) body.speakers_count = Math.floor(o.speakersCount);
+  // speakers_count is a machine-transcriber hint only ("not allowed for human transcription jobs")
+  if (o.speakersCount && o.speakersCount > 0 && (o.transcriber ?? "human") === "machine") body.speakers_count = Math.floor(o.speakersCount);
   if (o.callbackUrl) body.notification_config = o.callbackSecret ? { url: o.callbackUrl, auth_headers: { Authorization: `Bearer ${o.callbackSecret}` } } : { url: o.callbackUrl };
   return body;
 }

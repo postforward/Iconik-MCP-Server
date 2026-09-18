@@ -83,25 +83,26 @@ function redactBody(body: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Capitalised words and 2–3 word capitalised phrases that do not start a sentence (names, places, brands). */
-function mineProperNouns(text: string, max = 300): string[] {
+/** Proper nouns for the transcriber's vocabulary: capitalised words (and 2–3 word capitalised phrases) that never
+ *  appear in lowercase anywhere in the text, are not sentence starts, not contractions, and not common words. */
+function mineProperNouns(segmentTexts: string[], max = 300): string[] {
+  const text = segmentTexts.map((t) => t.trim()).filter(Boolean).join(". "); // every segment start counts as a sentence start
+  const lower = new Set((text.toLowerCase().match(/[a-z][a-z'’\-]+/g) ?? []));
+  const capitalisedOnly = (w: string) => !lower.has(w.toLowerCase()) || false;
+  const stop = new Set(["i", "the", "and", "but", "so", "um", "uh", "yeah", "okay", "ok", "oh", "mm", "hmm", "mr", "mrs", "ms", "dr", "god", "thanks", "thank", "woo", "wow", "hey", "hi", "hello", "yes", "no", "not", "you", "we", "they", "he", "she", "it", "this", "that", "these", "those", "are", "is", "was", "were", "because", "when", "what", "where", "why", "how", "who", "there", "here", "well", "like", "just", "right", "all", "our", "your", "my", "his", "her", "their", "if", "then", "now", "today", "tomorrow", "yesterday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]);
+  const ok = (w: string) => /^[A-Z][a-zA-Z\-]{2,}$/.test(w) && !w.includes("'") && !w.includes("’") && !stop.has(w.toLowerCase()) && capitalisedOnly(w);
   const counts = new Map<string, number>();
-  const stop = new Set(["I", "I'm", "I've", "I'll", "I'd", "The", "And", "But", "So", "Um", "Uh", "Yeah", "Okay", "Oh", "Mm", "Hmm", "Mr", "Mrs", "Ms", "Dr"]);
-  const sentences = text.split(/(?<=[.!?])\s+/);
-  for (const sent of sentences) {
-    const words = sent.replace(/[^\p{L}\p{N}'’.\- ]+/gu, " ").split(/\s+/).filter(Boolean);
+  for (const sent of text.split(/(?<=[.!?])\s+/)) {
+    const words = sent.replace(/[^\p{L}\p{N}'’.\- ]+/gu, " ").split(/\s+/).filter(Boolean).map((x) => x.replace(/[.,]+$/, ""));
     for (let i = 1; i < words.length; i++) {              // i = 0 is the sentence start → skipped
-      const w = words[i].replace(/[.,]+$/, "");
-      if (!/^[A-Z][a-zA-Z'’\-]{2,}$/.test(w) || stop.has(w)) continue;
-      let phrase = w;
-      for (let k = 1; k <= 2 && i + k < words.length; k++) {
-        const nx = words[i + k].replace(/[.,]+$/, "");
-        if (/^[A-Z][a-zA-Z'’\-]{1,}$/.test(nx) && !stop.has(nx)) phrase += " " + nx; else break;
-      }
+      if (!ok(words[i])) continue;
+      let phrase = words[i];
+      for (let k = 1; k <= 2 && i + k < words.length && ok(words[i + k]); k++) phrase += " " + words[i + k];
       counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
-      if (phrase !== w) counts.set(w, (counts.get(w) ?? 0) + 1);
+      if (phrase !== words[i]) counts.set(words[i], (counts.get(words[i]) ?? 0) + 1);
     }
   }
+  // lower-case words a proper noun never shows are the signal; "capitalisedOnly" already enforced it
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, max);
 }
 
@@ -133,7 +134,7 @@ async function one(assetId: string): Promise<Record<string, unknown>> {
       if (picked.segments.length) {
         iconikSpeakers = new Set(picked.segments.map((sg) => sg.transcription?.speaker ?? 0)).size;
         iconikNames = Object.values(picked.props?.speaker_labels ?? {}).map((n) => String(n).trim()).filter((n) => n && !/^speaker[ _]?\d+$/i.test(n));
-        iconikVocab = mineProperNouns(picked.segments.map((sg) => sg.segment_text).join(" "));
+        iconikVocab = mineProperNouns(picked.segments.map((sg) => sg.segment_text));
         log(`  iconik hints: ${picked.segments.length} segments, ${iconikSpeakers} speakers, names [${iconikNames.join(", ")}], ${iconikVocab.length} proper nouns`);
       }
     } catch (e) { log(`  (no iconik hints: ${e instanceof Error ? e.message.slice(0, 100) : e})`); }
