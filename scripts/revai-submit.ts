@@ -31,7 +31,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { initializeProfile, getCurrentProfileInfo } from "../src/client.ts";
 import { getProfileFromArgs, getProfile } from "../src/config.ts";
-import { fetchAsset, resolveActiveVersion, freshProxyUrl } from "../src/lib/iconik-transcripts.ts";
+import { fetchAsset, resolveActiveVersion, freshProxyUrl, fetchAllTranscription, fetchTranscriptionProperties, pickTranscription } from "../src/lib/iconik-transcripts.ts";
 import { submitJob, buildJobBody, waitForJob, type RevSubmitOpts } from "../src/lib/revai.ts";
 import { parseKeyterms } from "../src/lib/elevenlabs.ts";
 
@@ -83,6 +83,28 @@ function redactBody(body: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
+/** Capitalised words and 2–3 word capitalised phrases that do not start a sentence (names, places, brands). */
+function mineProperNouns(text: string, max = 300): string[] {
+  const counts = new Map<string, number>();
+  const stop = new Set(["I", "I'm", "I've", "I'll", "I'd", "The", "And", "But", "So", "Um", "Uh", "Yeah", "Okay", "Oh", "Mm", "Hmm", "Mr", "Mrs", "Ms", "Dr"]);
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  for (const sent of sentences) {
+    const words = sent.replace(/[^\p{L}\p{N}'’.\- ]+/gu, " ").split(/\s+/).filter(Boolean);
+    for (let i = 1; i < words.length; i++) {              // i = 0 is the sentence start → skipped
+      const w = words[i].replace(/[.,]+$/, "");
+      if (!/^[A-Z][a-zA-Z'’\-]{2,}$/.test(w) || stop.has(w)) continue;
+      let phrase = w;
+      for (let k = 1; k <= 2 && i + k < words.length; k++) {
+        const nx = words[i + k].replace(/[.,]+$/, "");
+        if (/^[A-Z][a-zA-Z'’\-]{1,}$/.test(nx) && !stop.has(nx)) phrase += " " + nx; else break;
+      }
+      counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
+      if (phrase !== w) counts.set(w, (counts.get(w) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, max);
+}
+
 async function one(assetId: string): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { ok: false, asset_id: assetId, transcriber, test_mode: testMode, dry_run: !live };
   const asset = await fetchAsset(assetId);
@@ -101,14 +123,32 @@ async function one(assetId: string): Promise<Record<string, unknown>> {
   if (useWebhook && !webhookUrl) throw new Error("no webhook URL: pass --webhook-url=<n8n receiver url> or set REVAI_WEBHOOK_URL in .env (or use --no-webhook)");
   const webhookSecret = useWebhook ? process.env.REVAI_WEBHOOK_SECRET : undefined;
   const metadata = `asset=${assetId} version=${versionId} profile=${profileName ?? ""}`;
+  // Hints from the transcript already in iconik (e.g. the ElevenLabs draft with names filled in): Rev.ai has no
+  // field for notes or a reference transcript, but it takes speaker names and a custom vocabulary, so we send
+  // the current speaker labels as names and the proper nouns of the draft as vocabulary. --no-iconik-hints disables.
+  let iconikNames: string[] = [], iconikVocab: string[] = [], iconikSpeakers = 0;
+  if (!has("no-iconik-hints")) {
+    try {
+      const picked = pickTranscription(await fetchAllTranscription(assetId), await fetchTranscriptionProperties(assetId, versionId));
+      if (picked.segments.length) {
+        iconikSpeakers = new Set(picked.segments.map((sg) => sg.transcription?.speaker ?? 0)).size;
+        iconikNames = Object.values(picked.props?.speaker_labels ?? {}).map((n) => String(n).trim()).filter((n) => n && !/^speaker[ _]?\d+$/i.test(n));
+        iconikVocab = mineProperNouns(picked.segments.map((sg) => sg.segment_text).join(" "));
+        log(`  iconik hints: ${picked.segments.length} segments, ${iconikSpeakers} speakers, names [${iconikNames.join(", ")}], ${iconikVocab.length} proper nouns`);
+      }
+    } catch (e) { log(`  (no iconik hints: ${e instanceof Error ? e.message.slice(0, 100) : e})`); }
+  }
+  const allNames = [...new Set([...speakerNames, ...iconikNames])];
+  const allVocab = [...new Set([...keyterms, ...allNames, ...iconikVocab])];
   const opts: RevSubmitOpts = {
     mediaUrl: proxy.url,
     transcriber,
     verbatim,
     rush,
     testMode,
-    speakerNames: speakerNames.length ? speakerNames : undefined,
-    vocabulary: keyterms.length ? keyterms : undefined,
+    speakerNames: allNames.length ? allNames : undefined,
+    speakersCount: arg("speakers-count") ? parseInt(arg("speakers-count")!, 10) : (iconikSpeakers || undefined),
+    vocabulary: allVocab.length ? allVocab : undefined,
     language,
     metadata,
     callbackUrl: webhookUrl,
