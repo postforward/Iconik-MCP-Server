@@ -1,0 +1,7 @@
+{"monologues":[
+ {"speaker":0,"elements":[
+  {"type":"text","value":"A","ts":7.53,"end_ts":7.62,"confidence":1.0},{"type":"text","value":" ","ts":7.62,"end_ts":7.64},{"type":"text","value":"destination","ts":7.64,"end_ts":8.23,"confidence":1.0},{"type":"text","value":" "},{"type":"text","value":"wedding","ts":8.32,"end_ts":8.64},{"type":"text","value":" "},{"type":"text","value":"promises","ts":8.7,"end_ts":9.1},{"type":"text","value":" "},{"type":"text","value":"the","ts":9.12,"end_ts":9.2},{"type":"text","value":" "},{"type":"text","value":"trip","ts":9.22,"end_ts":9.5},{"type":"punct","value":"."}]},
+ {"speaker":1,"elements":[
+  {"type":"text","value":"We","ts":13.5,"end_ts":13.6},{"type":"punct","value":" "},{"type":"text","value":"have","ts":13.62,"end_ts":13.8},{"type":"punct","value":" "},{"type":"unknown","value":"<unk>","ts":13.82,"end_ts":14.1},{"type":"punct","value":" "},{"type":"text","value":"opportunity","ts":14.32,"end_ts":14.8},{"type":"punct","value":","},{"type":"punct","value":" "},{"type":"text","value":"right","ts":14.82,"end_ts":15.0},{"type":"punct","value":"?"}]},
+ {"speaker":0,"elements":[{"type":"text","value":"Okay","ts":19.0,"end_ts":19.4},{"type":"punct","value":"."}]}
+]}

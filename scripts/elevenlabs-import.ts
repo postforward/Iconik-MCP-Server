@@ -8,6 +8,7 @@
  *   --from-webhook-payload=<file>   file written by the n8n webhook: {signature, raw_body_b64, received_at}
  *                                   or a raw ElevenLabs webhook JSON body (then --skip-verify is required)
  *   --transcription-id=<id>         GET /v1/speech-to-text/transcripts/{id}
+ *   --from-revai=<job id>           Rev.ai GET /jobs/{id}/transcript (human or machine); --from-json sniffs a saved Rev.ai JSON too
  *   --from-assemblyai=<id>          AssemblyAI GET /v2/transcript/{id} (names from speaker identification); --from-json
  *                                   also sniffs a saved AssemblyAI transcript JSON
  *   --from-json=<file> [--format=webhook|transcript|srt|vtt]   editor export / saved transcript (format by extension)
@@ -35,6 +36,7 @@ import { convertElevenLabsToSegments, convertSrtOrVtt, toBulkObjects, deriveSpea
 import { readTracking, writeTracking, TrackingNotConfigured } from "../src/lib/elevenlabs-tracking.ts";
 import { isHyperaudioProject, hyperaudioToTranscript, type ScoreMap } from "../src/lib/hyperaudio.ts";
 import { getTranscript as getAaiTranscript, assemblyaiToTranscript, isAssemblyAiTranscript } from "../src/lib/assemblyai.ts";
+import { getJob as getRevJob, getTranscript as getRevTranscript, revToTranscript, isRevTranscript } from "../src/lib/revai.ts";
 import { fetchAllTranscription as libFetchAllTranscription, countTranscription, resolveActiveVersion, fetchTranscriptionProperties, freshProxyUrl as libFreshProxyUrl, normLang, type IkTranscriptionSegment } from "../src/lib/iconik-transcripts.ts";
 
 const profileName = getProfileFromArgs();
@@ -86,6 +88,13 @@ async function resolveSource(): Promise<Source> {
   }
   const tid = arg("transcription-id");
   if (tid) { const t = await getTranscript(tid); return { kind: "api", transcript: t, transcriptionId: tid, speakerLabels: deriveSpeakerLabels(t), description: `ElevenLabs GET transcript ${tid}` }; }
+  const rev = arg("from-revai");
+  if (rev) {
+    const job = await getRevJob(rev);
+    if (job.status !== "transcribed") throw new Error(`Rev.ai job ${rev} is ${job.status}${job.failure_detail ? ": " + job.failure_detail : ""}`);
+    const r = revToTranscript(await getRevTranscript(rev));
+    return { kind: "revai", transcript: r.transcript, transcriptionId: rev, language: arg("language"), description: `Rev.ai ${job.type ?? ""} job ${rev} (${r.transcript.words.length} words, speakers ${r.speakers.join(",")})`, extra: { engine: "Rev.ai", job_type: job.type ?? null } };
+  }
   const aai = arg("from-assemblyai");
   if (aai) {
     const t = await getAaiTranscript(aai);
@@ -113,6 +122,7 @@ async function resolveSource(): Promise<Source> {
         description: `Hyperaudio project ${fj} (${st.words} words, ${st.paragraphs} paragraphs, ${st.struck} struck, ${st.inserted} edited/inserted${scores ? "" : ", NO score sidecar"}; speakers ${Object.entries(r.speakerMap).map(([n, i]) => `${n}=${i}`).join(", ")})`,
         extra: { hyperaudio_stats: st, speaker_map: r.speakerMap, exported_at: prov.exportedAt ?? null, revision: prov.revision ?? null } };
     }
+    if (isRevTranscript(j)) { const r = revToTranscript(j); return { kind: "revai-json", transcript: r.transcript, language: arg("language"), description: `Rev.ai transcript JSON ${fj} (${r.transcript.words.length} words, speakers ${r.speakers.join(",")})`, extra: { engine: "Rev.ai" } }; }
     if (isAssemblyAiTranscript(j)) { const r = assemblyaiToTranscript(j); return { kind: "assemblyai-json", transcript: r.transcript, transcriptionId: j.id, speakerLabels: r.speakerLabels, language: r.transcript.language_code || undefined, description: `AssemblyAI JSON ${fj} (${r.transcript.words.length} words${r.speakerLabels ? ", names " + Object.values(r.speakerLabels).join(", ") : ""})`, extra: { engine: "AssemblyAI", speaker_map: r.speakerMap } }; }
     if (j?.data?.transcription) { const md = parseWebhookMetadata(j.data.webhook_metadata); return { kind: "webhook-json", transcript: j.data.transcription, assetId: md.asset_id, versionId: md.version_id, transcriptionId: j.data.transcription.transcription_id ?? j.data.request_id, speakerLabels: deriveSpeakerLabels(j), description: `webhook JSON ${fj}` }; }
     if (Array.isArray(j?.words)) return { kind: "transcript-json", transcript: j, transcriptionId: j.transcription_id ?? undefined, speakerLabels: deriveSpeakerLabels(j), language: j.language_code, description: `transcript JSON ${fj}` };
@@ -218,7 +228,7 @@ async function main() {
     bulkObjects = toBulkObjects(segments, versionId, transcriptionId);
     speakerLabels = arg("speaker-labels") ? JSON.parse(arg("speaker-labels")!) : src.speakerLabels;
     if (["api", "tracked", "srt", "vtt", "transcript-json", "editor-json", "hyperaudio-json"].includes(src.kind)) statusOnSuccess = "EDIT_IMPORTED";
-    (main as any).sourceTranscriptionId = ["hyperaudio-json", "assemblyai", "assemblyai-json"].includes(src.kind) ? undefined : src.transcriptionId;
+    (main as any).sourceTranscriptionId = ["hyperaudio-json", "assemblyai", "assemblyai-json", "revai", "revai-json"].includes(src.kind) ? undefined : src.transcriptionId;
     (main as any).sourceExtra = src.extra ?? null;
   }
 
@@ -253,7 +263,7 @@ async function main() {
   // 3. transcription properties FIRST — iconik assigns the id that segments must carry as transcription_id
   const srcEngine = ((main as any).sourceExtra?.engine as string | undefined);
   const engineName = arg("engine") ?? srcEngine ?? "ElevenLabs";
-  const engineModel = engineName === "ElevenLabs" ? "scribe_v2" : engineName === "AssemblyAI" ? "universal-3-5-pro" : "edited";
+  const engineModel = engineName === "ElevenLabs" ? "scribe_v2" : engineName === "AssemblyAI" ? "universal-3-5-pro" : engineName === "Rev.ai" ? (((main as any).sourceExtra?.job_type as string | undefined) ?? "human") : "edited";
   const propsBody: Record<string, unknown> = { engine_info: { name: engineName, model: engineModel, version: new Date().toISOString().slice(0, 10), type: "EXTERNAL" } };
   const lang = normLang(language); if (lang) propsBody.language = lang;
   if (speakerLabels) propsBody.speaker_labels = speakerLabels;
