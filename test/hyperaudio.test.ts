@@ -162,3 +162,29 @@ test("helpers: presigned expiry, mime, language", () => {
   assert.equal(normLang("eng"), "en");
   assert.equal(normLang("en-US"), "en");
 });
+
+test("export: overlapping speakers and stacked timestamps still round-trip to the right speakers", () => {
+  const seg = (id: string, spk: number, start: number, end: number, text: string): IkTranscriptionSegment => {
+    const ws = text.split(" "); const step = Math.max(0, end - start) / ws.length;
+    return { id, asset_id: "a", version_id: "v", transcription_id: "t", segment_type: "TRANSCRIPTION", segment_text: text, time_start_milliseconds: start, time_end_milliseconds: end, date_created: "2026", status: "ACTIVE",
+      transcription: { speaker: spk, words: ws.map((w, k) => ({ value: w, start_ms: Math.round(k * step), end_ms: Math.round((k + 1) * step), score: 1 })) } } as any;
+  };
+  const segs = [
+    seg("1", 1, 10000, 13000, "Oh my goodness look at that"),
+    seg("2", 3, 12000, 12500, "Oh look"),                 // overlaps speaker 1
+    seg("3", 1, 13000, 13000, "You want a speech tonight"), // stacked: zero duration, same instant as…
+    seg("4", 3, 13000, 13000, "I'm good"),                  // …this one
+    seg("5", 1, 13000, 13000, "Who's ready to eat"),
+    seg("6", 0, 15000, 18000, "The hotel has transformed"),
+  ];
+  const { project, scores } = iconikToHyperaudio(segs, { id: "t", speaker_labels: { "0": "Ben", "1": "McKenzie", "3": "Guest" } }, { assetId: "a", versionId: "v", title: "t" }, { paragraphs: "segment" });
+  const w = project.transcript.words, p = project.transcript.paragraphs;
+  assert.ok(w.every((x, i) => i === 0 || x.start > w[i - 1].start), "word starts strictly increase");
+  assert.ok(p.every((x, i) => i === 0 || x.start > p[i - 1].start), "paragraph starts strictly increase");
+  assert.deepEqual(p.map((x) => x.speaker), ["McKenzie", "Guest", "McKenzie", "Guest", "McKenzie", "Ben"]);
+  const r = hyperaudioToTranscript(clone(project), { scores, knownLabels: { "0": "Ben", "1": "McKenzie", "3": "Guest" } });
+  const { segments } = convertElevenLabsToSegments(r.transcript);
+  assert.deepEqual(segments.map((s) => s.segment_text), segs.map((s) => s.segment_text));
+  assert.deepEqual(segments.map((s) => s.transcription.speaker), [1, 3, 1, 3, 1, 0]);
+  assert.equal(Object.keys(scores).length, w.length, "every word keeps its score key");
+});

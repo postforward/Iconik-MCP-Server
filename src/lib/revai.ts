@@ -127,6 +127,37 @@ export function revToTranscript(t: RevTranscript): { transcript: ElTranscript; s
       first = false;
     }
   }
+  spreadStackedWords(words);
   const transcript: ElTranscript = { language_code: "", text: words.filter((w) => w.type === "word").map((w) => w.text).join(" "), words };
   return { transcript, speakers: [...speakers].sort((a, b) => a - b), speakerLabels: Object.keys(labels).length ? labels : undefined };
+}
+
+/**
+ * Human transcripts sometimes come back with runs of words that all carry the SAME instant (ts == end_ts,
+ * e.g. 13 words at 27:43.0 in a crosstalk passage): the text is right but the alignment collapsed. Spread each
+ * such run evenly between the previous real timestamp and the next one so the words are at least in order and
+ * roughly placed (the editor's own aligner does the same for inserted words). Mutates in place.
+ */
+export function spreadStackedWords(words: ElWord[], minWordSec = 0.12): number {
+  let fixed = 0;
+  let i = 0;
+  while (i < words.length) {
+    const w = words[i];
+    const isStacked = (x: ElWord) => (x.end ?? x.start ?? 0) - (x.start ?? 0) <= 0;
+    if (!isStacked(w)) { i++; continue; }
+    let j = i;
+    while (j < words.length && isStacked(words[j]) && Math.abs((words[j].start ?? 0) - (w.start ?? 0)) < 0.001) j++;
+    const run = words.slice(i, j);
+    if (run.length >= 2) {
+      const prevEnd = i > 0 ? (words[i - 1].end ?? words[i - 1].start ?? 0) : (w.start ?? 0);
+      const nextStart = j < words.length ? (words[j].start ?? prevEnd) : prevEnd;
+      const from = Math.max(prevEnd, w.start ?? 0);
+      const span = Math.max(nextStart - from, run.length * minWordSec);
+      const step = span / run.length;
+      run.forEach((x, k) => { x.start = Math.round((from + k * step) * 1000) / 1000; x.end = Math.round((from + (k + 1) * step) * 1000) / 1000; });
+      fixed += run.length;
+    }
+    i = Math.max(j, i + 1);
+  }
+  return fixed;
 }

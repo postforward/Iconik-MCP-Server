@@ -119,14 +119,16 @@ export function iconikToHyperaudio(
     for (const w of segWords) {
       let absStart = s.time_start_milliseconds + Math.max(0, w.start_ms ?? 0);
       let absEnd = s.time_start_milliseconds + Math.max(w.end_ms ?? w.start_ms ?? 0, w.start_ms ?? 0);
-      if (absStart < lastAbsMs) absStart = lastAbsMs; // keep monotonic (the editor sorts by start)
+      // STRICTLY increasing starts: the editor assigns words to paragraphs by start time, so two paragraphs
+      // (or two words) sharing an instant — overlapping speakers, stacked human timestamps — would scramble
+      // attribution. Each word gets at least 1 ms after the previous one; paragraph starts follow their words.
+      if (absStart <= lastAbsMs) absStart = lastAbsMs + 1;
       if (absEnd < absStart) absEnd = absStart;
       lastAbsMs = absStart;
       const text = w.value.trim();
       words.push({ start: sec(absStart), end: sec(absEnd), text });
       if (typeof w.score === "number") scores[scoreKey(absStart, text)] = w.score;
-      if (first && newPara) cur!.start = sec(absStart);
-      if (first && !newPara && cur) cur.start = Math.min(cur.start, sec(absStart));
+      if (first && newPara) cur!.start = sec(absStart); // first word of the paragraph = its start (strictly increasing)
       cur!.end = Math.max(cur!.end, sec(absEnd));
       first = false;
     }

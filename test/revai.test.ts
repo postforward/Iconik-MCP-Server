@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
-import { revToTranscript, buildJobBody, isRevTranscript, verifyCallbackAuth, type RevTranscript } from "../src/lib/revai.ts";
+import { revToTranscript, buildJobBody, isRevTranscript, verifyCallbackAuth, spreadStackedWords, type RevTranscript } from "../src/lib/revai.ts";
 import { convertElevenLabsToSegments } from "../src/lib/elevenlabs-to-iconik.ts";
 import { isAssemblyAiTranscript } from "../src/lib/assemblyai.ts";
 import { isHyperaudioProject } from "../src/lib/hyperaudio.ts";
@@ -37,4 +37,23 @@ test("rev.ai: job body, sniffing, callback auth", () => {
   assert.equal(verifyCallbackAuth("Bearer s3cret", "s3cret"), true);
   assert.equal(verifyCallbackAuth("Bearer nope!", "s3cret"), false);
   assert.equal(verifyCallbackAuth(undefined, "s3cret"), false);
+});
+
+test("rev.ai: a run of words stacked on one instant is spread between its neighbours", () => {
+  const stacked: RevTranscript = { monologues: [
+    { speaker: 0, elements: [{ type: "text", value: "Before", ts: 10, end_ts: 10.5 }] },
+    { speaker: 1, elements: [{ type: "text", value: "You", ts: 12, end_ts: 12 }, { type: "punct", value: " " }, { type: "text", value: "want", ts: 12, end_ts: 12 }, { type: "punct", value: " " }, { type: "text", value: "food?", ts: 12, end_ts: 12 }] },
+    { speaker: 0, elements: [{ type: "text", value: "After", ts: 15, end_ts: 15.4 }] },
+  ] };
+  const r = revToTranscript(stacked);
+  const w = r.transcript.words.map((x) => [x.text, x.start, x.end]);
+  assert.deepEqual(w[0], ["Before", 10, 10.5]);
+  assert.deepEqual(w[1], ["You", 12, 13]);
+  assert.deepEqual(w[2], ["want", 13, 14]);
+  assert.deepEqual(w[3], ["food?", 14, 15]);
+  assert.deepEqual(w[4], ["After", 15, 15.4]);
+  // a lone zero-duration word is left alone; a run with no following word gets a minimum width per word
+  const tail = [{ text: "a", type: "word" as const, start: 1, end: 1 }, { text: "b", type: "word" as const, start: 1, end: 1 }];
+  assert.equal(spreadStackedWords(tail), 2);
+  assert.ok(tail[1].end! > tail[1].start! && tail[1].start! >= tail[0].end!);
 });
