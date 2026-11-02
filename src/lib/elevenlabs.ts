@@ -208,14 +208,18 @@ export function editorUrl(transcriptionId: string): string {
   return tpl.replace("{id}", encodeURIComponent(transcriptionId));
 }
 
-/** Split free text into ElevenLabs keyterms: comma / semicolon / newline separated, trimmed, deduped, ≤50 chars, ≤1000. */
+/**
+ * Split free text into ElevenLabs keyterms: comma / semicolon / newline separated, trimmed, deduped, ≤50 chars, ≤1000.
+ * Cast-list lines ("Gina - Family Member / Appears with Uncle Don") keep only the name before the dash; ElevenLabs
+ * rejects the whole request if any keyterm has more than 4 spaces, so longer terms are dropped.
+ */
 export function parseKeyterms(raw: string | undefined | null): string[] {
   if (!raw) return [];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const piece of raw.split(/[,;\n]+/)) {
-    const k = piece.trim().replace(/\s+/g, " ");
-    if (!k || k.length > 50) continue;
+    const k = piece.trim().replace(/\s+/g, " ").split(/ [-–—:] /)[0].trim();
+    if (!k || k.length > 50 || k.split(" ").length > 5) continue;
     const key = k.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
